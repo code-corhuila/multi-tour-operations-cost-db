@@ -52,3 +52,39 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-tables-004
+      author: Molina211
+      labels: "HU-OPS-002,ddl,tables"
+      comment: "A vehicle of a tenant: a name and a capacity from 1 to 100 seats. It is never deleted (spec AC-DB-02.1, AC-DB-02.3)."
+      changes:
+        - sqlFile:
+            path: 004_create_vehicle.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/004_create_vehicle.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-tables-005
+      author: Molina211
+      labels: "HU-OPS-002,ddl,tables"
+      comment: "The assignment of a vehicle to a departure, identified by the pair (spec AC-DB-02.4)."
+      changes:
+        - sqlFile:
+            path: 005_create_salida_vehicle.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/005_create_salida_vehicle.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

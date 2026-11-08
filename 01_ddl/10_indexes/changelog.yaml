@@ -34,3 +34,21 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-indexes-003
+      author: Molina211
+      labels: "HU-OPS-002,ddl,indexes"
+      comment: "The unique name of a vehicle per tenant, and the lookup of the departures of a vehicle. Both tables are new and empty."
+      changes:
+        - sqlFile:
+            path: 003_create_vehicle_indexes.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/10_indexes/003_create_vehicle_indexes.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

@@ -1,0 +1,2 @@
+DROP INDEX IF EXISTS operations_cost.idx_salida_vehicle_tenant_id_vehicle_id;
+DROP INDEX IF EXISTS operations_cost.uq_vehicle_tenant_id_name;
