@@ -12,6 +12,11 @@
 #   I·the_application_user_cannot_delete_a_departure                   AC-DB-01.6
 #   I·an_idempotency_key_is_unique_and_8_to_128_characters             AC-DB-01.7
 #   I·an_outbox_row_needs_its_type_tenant_payload_and_instant          AC-DB-01.8
+# Checks of spec 002 (HU-OPS-002, the vehicles):
+#   I·a_vehicle_has_a_name_and_a_capacity_in_range                     AC-DB-02.1
+#   I·a_vehicle_name_is_unique_in_a_tenant_ignoring_case_and_spaces    AC-DB-02.2
+#   I·the_application_user_cannot_delete_a_vehicle                     AC-DB-02.3, -02.6
+#   I·an_assignment_joins_a_vehicle_and_a_departure_of_one_tenant      AC-DB-02.4, -02.5
 #
 # It starts its own throwaway PostgreSQL (the image of multi-tour-infra-postgres) and builds the runner image of
 # deploy/Dockerfile on a private network, with passwords generated now, so it touches nothing else and writes no
@@ -172,7 +177,12 @@ departure() { # [column=value ...]
     "$id" "$tenant" "$code" "$service" "$starts" "$ends" "$zone" "$status" "$by" "$at"
 }
 # the key table references the departures, so both are truncated together
-clean_departures() { psql_admin -c "TRUNCATE operations_cost.idempotency_key, operations_cost.salida" >/dev/null || { echo "could not clean the departures"; return 1; }; }
+# (the vehicle tables are included when they exist, so the checks of spec 001 also run on a schema without them)
+clean_departures() {
+  tables=$(psql_admin -c "SELECT string_agg(format('%I.%I', schemaname, tablename), ',') FROM pg_tables
+    WHERE schemaname = '$SCHEMA' AND tablename IN ('idempotency_key', 'salida', 'salida_vehicle', 'vehicle')")
+  psql_admin -c "TRUNCATE $tables" >/dev/null || { echo "could not clean the departures"; return 1; }
+}
 
 a_departure_missing_any_mandatory_value_is_refused() {
   clean_departures || return 1
@@ -283,6 +293,77 @@ an_idempotency_key_is_unique_and_8_to_128_characters() {
   psql_app -c "$(key creation:$T1 appkey001 "$id")" >/dev/null || { echo "the application user cannot write a key"; return 1; }
 }
 
+# ---- the probes of the vehicles (spec 002, task DB2-01)
+V1=00000000-0000-4000-8000-0000000000e1
+V2=00000000-0000-4000-8000-0000000000e2
+vehicle() { # [column=value ...]: a vehicle, valid unless overridden
+  id="'$V1'"; tenant="'$T1'"; name="'Van 1'"; capacity="12"; by="'$ACTOR'"; at="now()"
+  for kv in "$@"; do
+    v=${kv#*=}
+    case ${kv%%=*} in
+      id) id=$v ;; tenant) tenant=$v ;; name) name=$v ;; capacity) capacity=$v ;; by) by=$v ;; at) at=$v ;;
+      *) printf 'UNKNOWN_OVERRIDE_%s' "${kv%%=*}"; return 0 ;;
+    esac
+  done
+  printf "INSERT INTO operations_cost.vehicle (vehicle_id, tenant_id, name, capacity, created_by, created_at) VALUES (%s, %s, %s, %s, %s, %s)" \
+    "$id" "$tenant" "$name" "$capacity" "$by" "$at"
+}
+assignment() { # salida id, vehicle id, tenant
+  printf "INSERT INTO operations_cost.salida_vehicle (tenant_id, salida_id, vehicle_id, assigned_by, assigned_at) VALUES ('%s', '%s', '%s', '%s', now())" "${3:-$T1}" "$1" "$2"  "$ACTOR"
+}
+
+a_vehicle_has_a_name_and_a_capacity_in_range() {
+  clean_departures || return 1
+  psql_admin -c "$(vehicle)" >/dev/null || { echo "a complete vehicle was refused"; return 1; }
+  for kv in id=NULL tenant=NULL name=NULL capacity=NULL by=NULL at=NULL; do
+    refused "null value in column" "$(vehicle "$kv")" || { echo "  (override $kv)"; return 1; }
+  done
+  refused chk_vehicle_name "$(vehicle "id='$V2'" "name=''")" || return 1
+  refused chk_vehicle_name "$(vehicle "id='$V2'" "name='   '")" || return 1
+  refused chk_vehicle_name "$(vehicle "id='$V2'" "name='$(printf 'n%.0s' $(seq 1 61))'")" || return 1
+  refused chk_vehicle_capacity "$(vehicle "id='$V2'" "name='Van 2'" "capacity=0")" || return 1
+  refused chk_vehicle_capacity "$(vehicle "id='$V2'" "name='Van 2'" "capacity=101")" || return 1
+  psql_admin -c "$(vehicle "id='$V2'" "name='Van 2'" "capacity=1")" >/dev/null || { echo "a capacity of 1 was refused"; return 1; }
+  psql_admin -c "$(vehicle "id=gen_random_uuid()" "name='Bus'" "capacity=100")" >/dev/null || { echo "a capacity of 100 was refused"; return 1; }
+  psql_admin -c "$(vehicle "id=gen_random_uuid()" "name='$(printf 'n%.0s' $(seq 1 60))'")" >/dev/null || { echo "a name of 60 characters was refused"; return 1; }
+}
+a_vehicle_name_is_unique_in_a_tenant_ignoring_case_and_spaces() {
+  clean_departures || return 1
+  psql_admin -c "$(vehicle)" >/dev/null || return 1
+  refused uq_vehicle_tenant_id_name "$(vehicle "id='$V2'" "name='van 1'")" || return 1
+  refused uq_vehicle_tenant_id_name "$(vehicle "id='$V2'" "name='  VAN 1  '")" || return 1
+  psql_admin -c "$(vehicle "id='$V2'" "tenant='$T2'")" >/dev/null || { echo "the same name in another tenant was refused"; return 1; }
+}
+the_application_user_cannot_delete_a_vehicle() {
+  clean_departures || return 1
+  psql_app -c "$(vehicle)" >/dev/null || { echo "the application user cannot insert a vehicle"; return 1; }
+  [ "$(psql_app -c "SELECT count(*) FROM operations_cost.vehicle")" = 1 ] || { echo "the application user cannot read a vehicle"; return 1; }
+  out=$(psql_app -c "DELETE FROM operations_cost.vehicle" 2>&1) && { echo "the application user deleted a vehicle"; return 1; }
+  printf '%s' "$out" | grep -q "permission denied" || { echo "refused, but not for a missing privilege: $out"; return 1; }
+  [ "$(psql_admin -c "SELECT count(*) FROM operations_cost.vehicle")" = 1 ] || { echo "the vehicle is gone"; return 1; }
+}
+an_assignment_joins_a_vehicle_and_a_departure_of_one_tenant() {
+  clean_departures || return 1
+  psql_admin -c "$(departure "id='00000000-0000-4000-8000-0000000000f1'")" >/dev/null || return 1
+  psql_admin -c "$(departure "id='00000000-0000-4000-8000-0000000000f2'" "tenant='$T2'")" >/dev/null || return 1
+  psql_admin -c "$(vehicle)" >/dev/null || return 1
+  S1=00000000-0000-4000-8000-0000000000f1; S2=00000000-0000-4000-8000-0000000000f2
+  psql_admin -c "$(assignment $S1 $V1)" >/dev/null || { echo "a valid assignment was refused"; return 1; }
+  refused pk_salida_vehicle "$(assignment $S1 $V1)" || return 1
+  # the departure of another tenant, and a tenant that does not own the vehicle
+  refused fk_salida_vehicle_salida "$(assignment $S2 $V1)" || return 1
+  refused fk_salida_vehicle_vehicle "$(assignment $S2 $V1 $T2)" || return 1
+  refused fk_salida_vehicle_salida "$(assignment 00000000-0000-4000-8000-0000000000ff $V1)" || return 1
+  # neither side can disappear from under an assignment
+  refused fk_salida_vehicle_vehicle "DELETE FROM operations_cost.vehicle WHERE vehicle_id = '$V1'" || return 1
+  refused fk_salida_vehicle_salida "DELETE FROM operations_cost.salida WHERE salida_id = '$S1'" || return 1
+  [ "$(psql_admin -c "SELECT count(*) FROM pg_indexes WHERE schemaname = 'operations_cost' AND indexname = 'idx_salida_vehicle_tenant_id_vehicle_id'")" = 1 ] || { echo "the index of the vehicle lookup is missing"; return 1; }
+  # the service reads, adds and (part B) will remove assignments, never deletes a vehicle
+  psql_admin -c "$(vehicle "id='$V2'" "name='Van 2'")" >/dev/null || return 1
+  psql_app -c "$(assignment $S1 $V2)" >/dev/null || { echo "the application user cannot add an assignment"; return 1; }
+  [ "$(psql_app -c "SELECT count(*) FROM operations_cost.salida_vehicle")" = 2 ] || { echo "the application user cannot read the assignments"; return 1; }
+}
+
 # ---- the instance, as multi-tour-infra-postgres leaves it: the database, the user of the domain and another domain's schema
 docker network create "$RUN_ID" >/dev/null || exit 1
 docker run -d --name "$RUN_ID" --network "$RUN_ID" -e POSTGRES_PASSWORD="$ADMIN_PASSWORD" -e POSTGRES_DB="$DB" "$POSTGRES_IMAGE" >/dev/null || exit 1
@@ -311,6 +392,10 @@ check "I·the_tenant_is_mandatory_and_indexed_with_state_and_start" the_tenant_i
 check "I·the_application_user_cannot_delete_a_departure" the_application_user_cannot_delete_a_departure
 check "I·an_idempotency_key_is_unique_and_8_to_128_characters" an_idempotency_key_is_unique_and_8_to_128_characters
 check "I·an_outbox_row_needs_its_type_tenant_payload_and_instant" an_outbox_row_needs_its_type_tenant_payload_and_instant
+check "I·a_vehicle_has_a_name_and_a_capacity_in_range" a_vehicle_has_a_name_and_a_capacity_in_range
+check "I·a_vehicle_name_is_unique_in_a_tenant_ignoring_case_and_spaces" a_vehicle_name_is_unique_in_a_tenant_ignoring_case_and_spaces
+check "I·the_application_user_cannot_delete_a_vehicle" the_application_user_cannot_delete_a_vehicle
+check "I·an_assignment_joins_a_vehicle_and_a_departure_of_one_tenant" an_assignment_joins_a_vehicle_and_a_departure_of_one_tenant
 check "I·the_full_rollback_leaves_nothing_and_the_rebuild_is_identical" the_full_rollback_leaves_nothing_and_the_rebuild_is_identical
 
 [ "$fail" = 0 ] && echo "ALL CHECKS PASSED" || echo "SOME CHECKS FAILED"
