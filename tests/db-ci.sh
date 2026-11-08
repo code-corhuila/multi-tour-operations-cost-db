@@ -357,7 +357,13 @@ an_assignment_joins_a_vehicle_and_a_departure_of_one_tenant() {
   # neither side can disappear from under an assignment
   refused fk_salida_vehicle_vehicle "DELETE FROM operations_cost.vehicle WHERE vehicle_id = '$V1'" || return 1
   refused fk_salida_vehicle_salida "DELETE FROM operations_cost.salida WHERE salida_id = '$S1'" || return 1
-  [ "$(psql_admin -c "SELECT count(*) FROM pg_indexes WHERE schemaname = 'operations_cost' AND indexname = 'idx_salida_vehicle_tenant_id_vehicle_id'")" = 1 ] || { echo "the index of the vehicle lookup is missing"; return 1; }
+  for idx in vehicle_id salida_id; do
+    def=$(psql_admin -c "SELECT indexdef FROM pg_indexes WHERE schemaname = 'operations_cost' AND indexname = 'idx_salida_vehicle_tenant_id_$idx'")
+    case "$def" in
+      *"(tenant_id, $idx)"*) ;;
+      *) echo "the index of the foreign key must be on (tenant_id, $idx): '$def'"; return 1 ;;
+    esac
+  done
   # the service reads, adds and (part B) will remove assignments, never deletes a vehicle
   psql_admin -c "$(vehicle "id='$V2'" "name='Van 2'")" >/dev/null || return 1
   psql_app -c "$(assignment $S1 $V2)" >/dev/null || { echo "the application user cannot add an assignment"; return 1; }
