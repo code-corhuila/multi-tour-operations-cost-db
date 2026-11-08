@@ -26,7 +26,7 @@ APP_PASSWORD="app-$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 fail=0
 
 cleanup() {
-  docker rm -f "$RUN_ID" >/dev/null 2>&1 || true
+  docker rm -fv "$RUN_ID" >/dev/null 2>&1 || true
   docker network rm "$RUN_ID" >/dev/null 2>&1 || true
   docker rmi "$LIQUIBASE_IMAGE" >/dev/null 2>&1 || true
 }
@@ -106,9 +106,10 @@ own_control_table_no_database_service_no_volume_no_extension() {
   [ -f deploy/compose.yml ] || { echo "deploy/compose.yml is missing"; return 1; }
   # J.7: the only service is the runner; no database service, no volume
   grep -q "operations-cost-db-migrate" deploy/compose.yml || { echo "the runner operations-cost-db-migrate is not declared"; return 1; }
-  ! grep -Eq "^\s*(image:\s*postgres|volumes:)" deploy/compose.yml || { echo "deploy/compose.yml defines a database service or a volume"; return 1; }
-  # J.4: the extensions belong to the infrastructure
+  ! grep -Eq "^\s*(image:\s*[\"']?[a-z/]*postgres|volumes:)" deploy/compose.yml || { echo "deploy/compose.yml defines a database service or a volume"; return 1; }
+  # J.4: the extensions belong to the infrastructure; none is created by the migrations, in the source or in the engine
   ! grep -rqi "CREATE EXTENSION" 01_ddl 02_dml 03_dcl changelog || { echo "a migration creates an extension"; return 1; }
+  [ "$(psql_admin -c "SELECT count(*) FROM pg_extension WHERE extname <> 'plpgsql'")" = 0 ] || { echo "an extension exists after the migrations"; return 1; }
 }
 
 # ---- AC-DB-01.12: the positive control first, so the check cannot pass only because the other schema is out of reach
@@ -122,7 +123,9 @@ operations_cost_app_writes_only_its_schema() {
   seen=$(writable_schemas)
   psql_admin -c "REVOKE INSERT ON other_domain.probe FROM operations_cost_app" >/dev/null || return 1
   case "$seen" in *other_domain*) ;; *) echo "the privilege query did not see a granted write: '$seen'"; return 1 ;; esac
-  [ "$(writable_schemas)" = "" ] || [ "$(writable_schemas)" = "$SCHEMA" ] || { echo "operations_cost_app can write in: $(writable_schemas)"; return 1; }
+  # no table exists yet (the departure arrives with DB-02, which must then demand the schema itself here)
+  mine=$(writable_schemas)
+  [ -z "$mine" ] || [ "$mine" = "$SCHEMA" ] || { echo "operations_cost_app can write in: $mine"; return 1; }
   [ "$(psql_admin -c "SELECT has_schema_privilege('operations_cost_app', 'public', 'CREATE')")" = "f" ] || { echo "operations_cost_app can create in public"; return 1; }
   [ "$(psql_admin -c "SELECT has_schema_privilege('operations_cost_app', '$SCHEMA', 'CREATE')")" = "f" ] || { echo "operations_cost_app can create objects in $SCHEMA"; return 1; }
   [ "$(psql_admin -c "SELECT has_schema_privilege('operations_cost_app', '$SCHEMA', 'USAGE')")" = "t" ] || { echo "operations_cost_app cannot use $SCHEMA"; return 1; }

@@ -1,0 +1,18 @@
+databaseChangeLog:
+  - changeSet:
+      id: operations-cost-dcl-grants-001
+      author: Molina211
+      labels: "HU-OPS-001,dcl,grants"
+      comment: "The writer never deletes: a departure is cancelled, never erased (spec AC-DB-01.6, plan D-06)."
+      changes:
+        - sqlFile:
+            path: 001_grants.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/03_dcl/01_grants/001_grants.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
