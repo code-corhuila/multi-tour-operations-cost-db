@@ -63,8 +63,15 @@ check() { # name, then the command that must succeed
 
 # A fingerprint of what the schema holds, so a rebuild that differs in anything shows as a difference
 schema_fingerprint() {
-  psql_admin -c "SELECT coalesce(md5(string_agg(table_name || '.' || column_name || ':' || data_type || ':' || is_nullable, ',' ORDER BY table_name, column_name)), '')
-    FROM information_schema.columns WHERE table_schema = '$SCHEMA'"
+  psql_admin -c "SELECT coalesce(md5(string_agg(part, ',' ORDER BY part)), '') FROM (
+      SELECT 'column:' || table_name || '.' || column_name || ':' || data_type || ':' || is_nullable AS part
+        FROM information_schema.columns WHERE table_schema = '$SCHEMA'
+      UNION ALL SELECT 'index:' || indexdef FROM pg_indexes WHERE schemaname = '$SCHEMA'
+      UNION ALL SELECT 'constraint:' || conrelid::regclass::text || ':' || pg_get_constraintdef(oid) FROM pg_constraint
+        WHERE connamespace = '$SCHEMA'::regnamespace
+      UNION ALL SELECT 'grant:' || grantee || ':' || table_name || ':' || privilege_type FROM information_schema.role_table_grants
+        WHERE table_schema = '$SCHEMA' AND grantee LIKE 'operations_cost%'
+    ) x"
 }
 changelog_state() {
   psql_admin -c "SELECT count(*) || ':' || coalesce(md5(string_agg(id || md5sum, ',' ORDER BY orderexecuted)), '') FROM databasechangelog_operations_cost"
@@ -139,7 +146,7 @@ operations_cost_app_writes_only_its_schema() {
 T1=00000000-0000-4000-8000-0000000000a1
 T2=00000000-0000-4000-8000-0000000000a2
 SVC=00000000-0000-4000-8000-0000000000c1
-USER=00000000-0000-4000-8000-0000000000d1
+ACTOR=00000000-0000-4000-8000-0000000000d1
 
 psql_app() { docker exec -e PGPASSWORD="$APP_PASSWORD" "$RUN_ID" psql -h 127.0.0.1 -U operations_cost_app -d "$DB" -v ON_ERROR_STOP=1 -tA "$@"; }
 
@@ -151,12 +158,13 @@ refused() { # fragment, statement
 # one insert of a departure; each argument is a column=value override, the rest is valid
 departure() { # [column=value ...]
   id="gen_random_uuid()"; tenant="'$T1'"; code="'SAL-001'"; service="'$SVC'"; starts="'2026-12-01 08:00:00+00'"
-  ends="'2026-12-01 18:00:00+00'"; zone="'America/Bogota'"; status="'SCHEDULED'"; by="'$USER'"; at="now()"
+  ends="'2026-12-01 18:00:00+00'"; zone="'America/Bogota'"; status="'SCHEDULED'"; by="'$ACTOR'"; at="now()"
   for kv in "$@"; do
     v=${kv#*=}
     case ${kv%%=*} in
       id) id=$v ;; tenant) tenant=$v ;; code) code=$v ;; service) service=$v ;; starts) starts=$v ;;
       ends) ends=$v ;; zone) zone=$v ;; status) status=$v ;; by) by=$v ;; at) at=$v ;;
+      *) printf 'UNKNOWN_OVERRIDE_%s' "${kv%%=*}"; return 0 ;;
     esac
   done
   printf "INSERT INTO operations_cost.salida (salida_id, tenant_id, code, service_id, starts_at, estimated_end_at, time_zone, status, scheduled_by, scheduled_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)" \
@@ -170,6 +178,9 @@ a_departure_missing_any_mandatory_value_is_refused() {
   for kv in id=NULL tenant=NULL code=NULL service=NULL starts=NULL ends=NULL zone=NULL status=NULL by=NULL at=NULL; do
     refused "null value in column" "$(departure "$kv")" || { echo "  (override $kv)"; return 1; }
   done
+  refused chk_salida_time_zone "$(departure "zone=''")" || return 1
+  refused chk_salida_time_zone "$(departure "zone='$(printf 'z%.0s' $(seq 1 65))'")" || return 1
+  psql_admin -c "$(departure "code='SAL-002'" "zone='$(printf 'z%.0s' $(seq 1 64))'")" >/dev/null || { echo "a zone of 64 characters was refused"; return 1; }
 }
 an_end_before_the_start_is_refused_and_one_days_later_is_accepted() {
   clean_departures || return 1
@@ -194,6 +205,11 @@ the_tenant_is_mandatory_and_indexed_with_state_and_start() {
   psql_admin -c "$(departure "tenant='$T2'")" >/dev/null || { echo "the same code in another tenant was refused"; return 1; }
   refused chk_salida_code "$(departure "code='SAL-1'")" || return 1
   refused chk_salida_code "$(departure "code='sal-001'")" || return 1
+  refused chk_salida_code "$(departure "code='SAL-12'")" || return 1
+  refused chk_salida_code "$(departure "code='SAL-1234567'")" || return 1
+  psql_admin -c "$(departure "code='SAL-123456'")" >/dev/null || { echo "a code of six digits was refused"; return 1; }
+  [ "$(psql_admin -c "SELECT count(*) FROM pg_constraint WHERE connamespace = 'operations_cost'::regnamespace AND contype = 'f'")" = 0 ] \
+    || { echo "a foreign key exists: the tenant and the tour belong to other domains (Annex J.3.4)"; return 1; }
   def=$(psql_admin -c "SELECT indexdef FROM pg_indexes WHERE schemaname = 'operations_cost' AND indexname = 'idx_salida_tenant_id_status_starts_at'")
   case "$def" in
     *"(tenant_id, status, starts_at)"*) ;;
