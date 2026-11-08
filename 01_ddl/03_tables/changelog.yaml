@@ -88,3 +88,21 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-tables-006
+      author: Molina211
+      labels: "HU-OPS-002,ddl,tables"
+      comment: "The idempotency key of a vehicle creation, pointing to the vehicle it created (spec AC-DB-02.8)."
+      changes:
+        - sqlFile:
+            path: 006_create_vehicle_idempotency_key.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/006_create_vehicle_idempotency_key.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

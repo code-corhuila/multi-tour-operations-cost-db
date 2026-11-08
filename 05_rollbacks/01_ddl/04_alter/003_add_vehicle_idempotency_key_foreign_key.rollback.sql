@@ -1,0 +1,1 @@
+ALTER TABLE operations_cost.vehicle_idempotency_key DROP CONSTRAINT IF EXISTS fk_vehicle_idempotency_key_vehicle;

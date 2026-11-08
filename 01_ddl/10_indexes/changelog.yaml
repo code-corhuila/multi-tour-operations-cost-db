@@ -52,3 +52,21 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-indexes-004
+      author: Molina211
+      labels: "HU-OPS-002,ddl,indexes"
+      comment: "Serves the foreign key of the vehicle key table. The table is new and empty."
+      changes:
+        - sqlFile:
+            path: 004_create_vehicle_idempotency_key_index.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/10_indexes/004_create_vehicle_idempotency_key_index.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

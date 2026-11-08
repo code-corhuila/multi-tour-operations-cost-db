@@ -34,3 +34,21 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-alter-003
+      author: Molina211
+      labels: "HU-OPS-002,ddl,alter"
+      comment: "A vehicle key belongs to its vehicle and the vehicle cannot disappear from under it."
+      changes:
+        - sqlFile:
+            path: 003_add_vehicle_idempotency_key_foreign_key.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/003_add_vehicle_idempotency_key_foreign_key.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
