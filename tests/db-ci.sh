@@ -17,6 +17,7 @@
 #   I·a_vehicle_name_is_unique_in_a_tenant_ignoring_case_and_spaces    AC-DB-02.2
 #   I·the_application_user_cannot_delete_a_vehicle                     AC-DB-02.3, -02.6
 #   I·an_assignment_joins_a_vehicle_and_a_departure_of_one_tenant      AC-DB-02.4, -02.5
+#   I·a_vehicle_key_is_unique_8_to_128_characters_and_points_to_its_vehicle  AC-DB-02.8
 #
 # It starts its own throwaway PostgreSQL (the image of multi-tour-infra-postgres) and builds the runner image of
 # deploy/Dockerfile on a private network, with passwords generated now, so it touches nothing else and writes no
@@ -180,7 +181,7 @@ departure() { # [column=value ...]
 # (the vehicle tables are included when they exist, so the checks of spec 001 also run on a schema without them)
 clean_departures() {
   tables=$(psql_admin -c "SELECT string_agg(format('%I.%I', schemaname, tablename), ',') FROM pg_tables
-    WHERE schemaname = '$SCHEMA' AND tablename IN ('idempotency_key', 'salida', 'salida_vehicle', 'vehicle')")
+    WHERE schemaname = '$SCHEMA' AND tablename IN ('idempotency_key', 'salida', 'salida_vehicle', 'vehicle', 'vehicle_idempotency_key')")
   psql_admin -c "TRUNCATE $tables" >/dev/null || { echo "could not clean the departures"; return 1; }
 }
 
@@ -370,6 +371,22 @@ an_assignment_joins_a_vehicle_and_a_departure_of_one_tenant() {
   [ "$(psql_app -c "SELECT count(*) FROM operations_cost.salida_vehicle")" = 2 ] || { echo "the application user cannot read the assignments"; return 1; }
 }
 
+vehicle_key() { # scope, key, vehicle id
+  printf "INSERT INTO operations_cost.vehicle_idempotency_key (scope, idempotency_key, vehicle_id) VALUES ('%s', '%s', '%s')" "$1" "$2" "$3"
+}
+a_vehicle_key_is_unique_8_to_128_characters_and_points_to_its_vehicle() {
+  clean_departures || return 1
+  psql_admin -c "$(vehicle)" >/dev/null || return 1
+  psql_admin -c "$(vehicle_key createVehicle/$T1 abcdefgh $V1)" >/dev/null || { echo "a valid key was refused"; return 1; }
+  refused pk_vehicle_idempotency_key "$(vehicle_key createVehicle/$T1 abcdefgh $V1)" || return 1
+  psql_admin -c "$(vehicle_key createVehicle/$T2 abcdefgh $V1)" >/dev/null || { echo "the same key in another scope was refused"; return 1; }
+  refused chk_vehicle_idempotency_key_length "$(vehicle_key createVehicle/$T1 abcdefg $V1)" || return 1
+  refused chk_vehicle_idempotency_key_length "$(vehicle_key createVehicle/$T1 "$(printf 'k%.0s' $(seq 1 129))" $V1)" || return 1
+  refused fk_vehicle_idempotency_key_vehicle "$(vehicle_key createVehicle/$T1 hgfedcba 00000000-0000-4000-8000-0000000000ff)" || return 1
+  refused fk_vehicle_idempotency_key_vehicle "DELETE FROM operations_cost.vehicle WHERE vehicle_id = '$V1'" || return 1
+  psql_app -c "$(vehicle_key createVehicle/$T1 appkey001 $V1)" >/dev/null || { echo "the application user cannot write a vehicle key"; return 1; }
+}
+
 # ---- the instance, as multi-tour-infra-postgres leaves it: the database, the user of the domain and another domain's schema
 docker network create "$RUN_ID" >/dev/null || exit 1
 docker run -d --name "$RUN_ID" --network "$RUN_ID" -e POSTGRES_PASSWORD="$ADMIN_PASSWORD" -e POSTGRES_DB="$DB" "$POSTGRES_IMAGE" >/dev/null || exit 1
@@ -402,6 +419,7 @@ check "I·a_vehicle_has_a_name_and_a_capacity_in_range" a_vehicle_has_a_name_and
 check "I·a_vehicle_name_is_unique_in_a_tenant_ignoring_case_and_spaces" a_vehicle_name_is_unique_in_a_tenant_ignoring_case_and_spaces
 check "I·the_application_user_cannot_delete_a_vehicle" the_application_user_cannot_delete_a_vehicle
 check "I·an_assignment_joins_a_vehicle_and_a_departure_of_one_tenant" an_assignment_joins_a_vehicle_and_a_departure_of_one_tenant
+check "I·a_vehicle_key_is_unique_8_to_128_characters_and_points_to_its_vehicle" a_vehicle_key_is_unique_8_to_128_characters_and_points_to_its_vehicle
 check "I·the_full_rollback_leaves_nothing_and_the_rebuild_is_identical" the_full_rollback_leaves_nothing_and_the_rebuild_is_identical
 
 [ "$fail" = 0 ] && echo "ALL CHECKS PASSED" || echo "SOME CHECKS FAILED"
