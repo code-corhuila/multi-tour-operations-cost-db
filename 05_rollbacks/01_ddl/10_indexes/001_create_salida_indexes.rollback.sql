@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS operations_cost.idx_salida_tenant_id_status_starts_at;
