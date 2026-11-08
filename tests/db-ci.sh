@@ -10,7 +10,8 @@
 #   I·only_the_four_states_of_the_pdr_are_accepted                     AC-DB-01.4
 #   I·the_tenant_is_mandatory_and_indexed_with_state_and_start         AC-DB-01.5
 #   I·the_application_user_cannot_delete_a_departure                   AC-DB-01.6
-# The next task adds the checks of the outbox and the idempotency key to this same file.
+#   I·an_idempotency_key_is_unique_and_8_to_128_characters             AC-DB-01.7
+#   I·an_outbox_row_needs_its_type_tenant_payload_and_instant          AC-DB-01.8
 #
 # It starts its own throwaway PostgreSQL (the image of multi-tour-infra-postgres) and builds the runner image of
 # deploy/Dockerfile on a private network, with passwords generated now, so it touches nothing else and writes no
@@ -170,7 +171,8 @@ departure() { # [column=value ...]
   printf "INSERT INTO operations_cost.salida (salida_id, tenant_id, code, service_id, starts_at, estimated_end_at, time_zone, status, scheduled_by, scheduled_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)" \
     "$id" "$tenant" "$code" "$service" "$starts" "$ends" "$zone" "$status" "$by" "$at"
 }
-clean_departures() { psql_admin -c "TRUNCATE operations_cost.salida" >/dev/null || { echo "could not clean the departures"; return 1; }; }
+# the key table references the departures, so both are truncated together
+clean_departures() { psql_admin -c "TRUNCATE operations_cost.idempotency_key, operations_cost.salida" >/dev/null || { echo "could not clean the departures"; return 1; }; }
 
 a_departure_missing_any_mandatory_value_is_refused() {
   clean_departures || return 1
@@ -208,8 +210,9 @@ the_tenant_is_mandatory_and_indexed_with_state_and_start() {
   refused chk_salida_code "$(departure "code='SAL-12'")" || return 1
   refused chk_salida_code "$(departure "code='SAL-1234567'")" || return 1
   psql_admin -c "$(departure "code='SAL-123456'")" >/dev/null || { echo "a code of six digits was refused"; return 1; }
-  [ "$(psql_admin -c "SELECT count(*) FROM pg_constraint WHERE connamespace = 'operations_cost'::regnamespace AND contype = 'f'")" = 0 ] \
-    || { echo "a foreign key exists: the tenant and the tour belong to other domains (Annex J.3.4)"; return 1; }
+  [ "$(psql_admin -c "SELECT count(*) FROM pg_constraint WHERE connamespace = 'operations_cost'::regnamespace AND contype = 'f'
+    AND (confrelid::regclass::text NOT LIKE 'operations_cost.%' OR conrelid = 'operations_cost.salida'::regclass)")" = 0 ] \
+    || { echo "a foreign key leaves the domain or starts in the departure: the tenant and the tour belong to other domains (Annex J.3.4)"; return 1; }
   def=$(psql_admin -c "SELECT indexdef FROM pg_indexes WHERE schemaname = 'operations_cost' AND indexname = 'idx_salida_tenant_id_status_starts_at'")
   case "$def" in
     *"(tenant_id, status, starts_at)"*) ;;
@@ -223,6 +226,61 @@ the_application_user_cannot_delete_a_departure() {
   out=$(psql_app -c "DELETE FROM operations_cost.salida" 2>&1) && { echo "the application user deleted a departure"; return 1; }
   printf '%s' "$out" | grep -q "permission denied" || { echo "refused, but not for a missing privilege: $out"; return 1; }
   [ "$(psql_admin -c "SELECT count(*) FROM operations_cost.salida")" = 1 ] || { echo "the departure is gone"; return 1; }
+}
+
+# ---- the probes of the outbox and of the idempotency key (spec 001, task DB-03)
+clean_outbox() { psql_admin -c "TRUNCATE operations_cost.idempotency_key, operations_cost.outbox_event" >/dev/null || { echo "could not clean the outbox"; return 1; }; }
+event() { # [column=value ...]: an event of the outbox, valid unless overridden
+  tenant="'$T1'"; type="'SalidaScheduled'"; aggregate="'$SVC'"; payload="'{\"code\":\"SAL-001\"}'"; correlation="'trace-001'"; occurred="now()"; status="'PENDING'"
+  for kv in "$@"; do
+    v=${kv#*=}
+    case ${kv%%=*} in
+      tenant) tenant=$v ;; type) type=$v ;; aggregate) aggregate=$v ;; payload) payload=$v ;; correlation) correlation=$v ;;
+      occurred) occurred=$v ;; status) status=$v ;;
+      *) printf 'UNKNOWN_OVERRIDE_%s' "${kv%%=*}"; return 0 ;;
+    esac
+  done
+  printf "INSERT INTO operations_cost.outbox_event (tenant_id, event_type, aggregate_id, payload, correlation_id, occurred_at, status) VALUES (%s, %s, %s, %s, %s, %s, %s)" \
+    "$tenant" "$type" "$aggregate" "$payload" "$correlation" "$occurred" "$status"
+}
+key() { # scope, key, departure id
+  printf "INSERT INTO operations_cost.idempotency_key (scope, idempotency_key, salida_id) VALUES ('%s', '%s', '%s')" "$1" "$2" "$3"
+}
+
+an_outbox_row_needs_its_type_tenant_payload_and_instant() {
+  clean_outbox || return 1
+  psql_admin -c "$(event)" >/dev/null || { echo "a complete event was refused"; return 1; }
+  for kv in tenant=NULL type=NULL aggregate=NULL payload=NULL correlation=NULL occurred=NULL; do
+    refused "null value in column" "$(event "$kv")" || { echo "  (override $kv)"; return 1; }
+  done
+  refused chk_outbox_event_status "$(event "status='DONE'")" || return 1
+  refused chk_outbox_event_event_type "$(event "type=''")" || return 1
+  refused chk_outbox_event_event_type "$(event "type='$(printf 't%.0s' $(seq 1 101))'")" || return 1
+  refused chk_outbox_event_correlation_id "$(event "correlation=''")" || return 1
+  # what a fresh row holds: it stays PENDING and unpublished until the relay publishes it (ADR-004 D4)
+  [ "$(psql_admin -c "SELECT status || ':' || attempts || ':' || (published_at IS NULL) FROM operations_cost.outbox_event")" = "PENDING:0:true" ] || { echo "a new event must be pending, with no attempt and unpublished"; return 1; }
+  refused chk_outbox_event_attempts "UPDATE operations_cost.outbox_event SET attempts = -1" || return 1
+  [ "$(psql_admin -c "SELECT count(*) FROM pg_indexes WHERE schemaname = 'operations_cost' AND indexname = 'idx_outbox_event_status_next_attempt_at'")" = 1 ] || { echo "the index of the relay is missing"; return 1; }
+  # the service writes the event in the same transaction as the departure, so the application user must insert it too
+  psql_app -c "$(event "correlation='trace-002'")" >/dev/null || { echo "the application user cannot insert an event"; return 1; }
+  psql_app -c "UPDATE operations_cost.outbox_event SET status = 'PUBLISHED', published_at = now()" >/dev/null || { echo "the application user cannot update an event"; return 1; }
+}
+an_idempotency_key_is_unique_and_8_to_128_characters() {
+  clean_departures || return 1
+  clean_outbox || return 1
+  psql_admin -c "$(departure)" >/dev/null || return 1
+  id=$(psql_admin -c "SELECT salida_id FROM operations_cost.salida LIMIT 1")
+  psql_admin -c "$(key creation:$T1 abcdefgh "$id")" >/dev/null || { echo "a valid key was refused"; return 1; }
+  refused pk_idempotency_key "$(key creation:$T1 abcdefgh "$id")" || return 1
+  psql_admin -c "$(key creation:$T2 abcdefgh "$id")" >/dev/null || { echo "the same key in another scope was refused"; return 1; }
+  refused chk_idempotency_key_length "$(key creation:$T1 abcdefg "$id")" || return 1
+  refused chk_idempotency_key_length "$(key creation:$T1 "$(printf 'k%.0s' $(seq 1 129))" "$id")" || return 1
+  psql_admin -c "$(key creation:$T1 "$(printf 'k%.0s' $(seq 1 128))" "$id")" >/dev/null || { echo "a key of 128 characters was refused"; return 1; }
+  # the key points to the departure it created and that departure cannot disappear from under it
+  refused fk_idempotency_key_salida "$(key creation:$T1 hgfedcba 00000000-0000-4000-8000-0000000000ff)" || return 1
+  refused fk_idempotency_key_salida "DELETE FROM operations_cost.salida WHERE salida_id = '$id'" || return 1
+  [ "$(psql_admin -c "SELECT count(*) FROM pg_indexes WHERE schemaname = 'operations_cost' AND indexname = 'idx_idempotency_key_salida_id'")" = 1 ] || { echo "the index of the foreign key is missing"; return 1; }
+  psql_app -c "$(key creation:$T1 appkey001 "$id")" >/dev/null || { echo "the application user cannot write a key"; return 1; }
 }
 
 # ---- the instance, as multi-tour-infra-postgres leaves it: the database, the user of the domain and another domain's schema
@@ -251,6 +309,8 @@ check "I·an_end_before_the_start_is_refused_and_one_days_later_is_accepted" an_
 check "I·only_the_four_states_of_the_pdr_are_accepted" only_the_four_states_of_the_pdr_are_accepted
 check "I·the_tenant_is_mandatory_and_indexed_with_state_and_start" the_tenant_is_mandatory_and_indexed_with_state_and_start
 check "I·the_application_user_cannot_delete_a_departure" the_application_user_cannot_delete_a_departure
+check "I·an_idempotency_key_is_unique_and_8_to_128_characters" an_idempotency_key_is_unique_and_8_to_128_characters
+check "I·an_outbox_row_needs_its_type_tenant_payload_and_instant" an_outbox_row_needs_its_type_tenant_payload_and_instant
 check "I·the_full_rollback_leaves_nothing_and_the_rebuild_is_identical" the_full_rollback_leaves_nothing_and_the_rebuild_is_identical
 
 [ "$fail" = 0 ] && echo "ALL CHECKS PASSED" || echo "SOME CHECKS FAILED"

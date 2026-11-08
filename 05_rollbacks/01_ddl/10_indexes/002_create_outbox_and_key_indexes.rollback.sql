@@ -1,0 +1,2 @@
+DROP INDEX IF EXISTS operations_cost.idx_idempotency_key_salida_id;
+DROP INDEX IF EXISTS operations_cost.idx_outbox_event_status_next_attempt_at;
