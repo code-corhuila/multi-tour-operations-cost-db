@@ -171,7 +171,8 @@ departure() { # [column=value ...]
   printf "INSERT INTO operations_cost.salida (salida_id, tenant_id, code, service_id, starts_at, estimated_end_at, time_zone, status, scheduled_by, scheduled_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)" \
     "$id" "$tenant" "$code" "$service" "$starts" "$ends" "$zone" "$status" "$by" "$at"
 }
-clean_departures() { psql_admin -c "TRUNCATE operations_cost.salida" >/dev/null || { echo "could not clean the departures"; return 1; }; }
+# the key table references the departures, so both are truncated together
+clean_departures() { psql_admin -c "TRUNCATE operations_cost.idempotency_key, operations_cost.salida" >/dev/null || { echo "could not clean the departures"; return 1; }; }
 
 a_departure_missing_any_mandatory_value_is_refused() {
   clean_departures || return 1
@@ -260,6 +261,8 @@ an_outbox_row_needs_its_type_tenant_payload_and_instant() {
   [ "$(psql_admin -c "SELECT status || ':' || attempts || ':' || (published_at IS NULL) FROM operations_cost.outbox_event")" = "PENDING:0:true" ] || { echo "a new event must be pending, with no attempt and unpublished"; return 1; }
   refused chk_outbox_event_attempts "UPDATE operations_cost.outbox_event SET attempts = -1" || return 1
   [ "$(psql_admin -c "SELECT count(*) FROM pg_indexes WHERE schemaname = 'operations_cost' AND indexname = 'idx_outbox_event_status_next_attempt_at'")" = 1 ] || { echo "the index of the relay is missing"; return 1; }
+  # the service writes the event in the same transaction as the departure, so the application user must insert it too
+  psql_app -c "$(event "correlation='trace-002'")" >/dev/null || { echo "the application user cannot insert an event"; return 1; }
   psql_app -c "UPDATE operations_cost.outbox_event SET status = 'PUBLISHED', published_at = now()" >/dev/null || { echo "the application user cannot update an event"; return 1; }
 }
 an_idempotency_key_is_unique_and_8_to_128_characters() {
