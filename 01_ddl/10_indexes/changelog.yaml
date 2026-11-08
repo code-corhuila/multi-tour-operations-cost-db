@@ -1,1 +1,18 @@
-databaseChangeLog: []
+databaseChangeLog:
+  - changeSet:
+      id: operations-cost-ddl-indexes-001
+      author: Molina211
+      labels: "HU-OPS-001,ddl,indexes"
+      comment: "The departures of a tenant by state and start (06-data modeling-conventions). The table is empty, so it is not created concurrently."
+      changes:
+        - sqlFile:
+            path: 001_create_salida_indexes.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/10_indexes/001_create_salida_indexes.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

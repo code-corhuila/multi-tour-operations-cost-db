@@ -5,7 +5,12 @@
 #   I·the_full_rollback_leaves_nothing_and_the_rebuild_is_identical   AC-DB-01.10
 #   I·own_control_table_no_database_service_no_volume_no_extension    AC-DB-01.11
 #   I·operations_cost_app_writes_only_its_schema                      AC-DB-01.12
-# Later tasks add the checks of the departure, the outbox and the idempotency key to this same file.
+#   I·a_departure_missing_any_mandatory_value_is_refused               AC-DB-01.2
+#   I·an_end_before_the_start_is_refused_and_one_days_later_is_accepted AC-DB-01.3
+#   I·only_the_four_states_of_the_pdr_are_accepted                     AC-DB-01.4
+#   I·the_tenant_is_mandatory_and_indexed_with_state_and_start         AC-DB-01.5
+#   I·the_application_user_cannot_delete_a_departure                   AC-DB-01.6
+# The next task adds the checks of the outbox and the idempotency key to this same file.
 #
 # It starts its own throwaway PostgreSQL (the image of multi-tour-infra-postgres) and builds the runner image of
 # deploy/Dockerfile on a private network, with passwords generated now, so it touches nothing else and writes no
@@ -58,8 +63,15 @@ check() { # name, then the command that must succeed
 
 # A fingerprint of what the schema holds, so a rebuild that differs in anything shows as a difference
 schema_fingerprint() {
-  psql_admin -c "SELECT coalesce(md5(string_agg(table_name || '.' || column_name || ':' || data_type || ':' || is_nullable, ',' ORDER BY table_name, column_name)), '')
-    FROM information_schema.columns WHERE table_schema = '$SCHEMA'"
+  psql_admin -c "SELECT coalesce(md5(string_agg(part, ',' ORDER BY part)), '') FROM (
+      SELECT 'column:' || table_name || '.' || column_name || ':' || data_type || ':' || is_nullable AS part
+        FROM information_schema.columns WHERE table_schema = '$SCHEMA'
+      UNION ALL SELECT 'index:' || indexdef FROM pg_indexes WHERE schemaname = '$SCHEMA'
+      UNION ALL SELECT 'constraint:' || conrelid::regclass::text || ':' || pg_get_constraintdef(oid) FROM pg_constraint
+        WHERE connamespace = '$SCHEMA'::regnamespace
+      UNION ALL SELECT 'grant:' || grantee || ':' || table_name || ':' || privilege_type FROM information_schema.role_table_grants
+        WHERE table_schema = '$SCHEMA' AND grantee LIKE 'operations_cost%'
+    ) x"
 }
 changelog_state() {
   psql_admin -c "SELECT count(*) || ':' || coalesce(md5(string_agg(id || md5sum, ',' ORDER BY orderexecuted)), '') FROM databasechangelog_operations_cost"
@@ -123,12 +135,94 @@ operations_cost_app_writes_only_its_schema() {
   seen=$(writable_schemas)
   psql_admin -c "REVOKE INSERT ON other_domain.probe FROM operations_cost_app" >/dev/null || return 1
   case "$seen" in *other_domain*) ;; *) echo "the privilege query did not see a granted write: '$seen'"; return 1 ;; esac
-  # no table exists yet (the departure arrives with DB-02, which must then demand the schema itself here)
   mine=$(writable_schemas)
-  [ -z "$mine" ] || [ "$mine" = "$SCHEMA" ] || { echo "operations_cost_app can write in: $mine"; return 1; }
+  [ "$mine" = "$SCHEMA" ] || { echo "operations_cost_app must write in $SCHEMA and nowhere else, and can write in: '$mine'"; return 1; }
   [ "$(psql_admin -c "SELECT has_schema_privilege('operations_cost_app', 'public', 'CREATE')")" = "f" ] || { echo "operations_cost_app can create in public"; return 1; }
   [ "$(psql_admin -c "SELECT has_schema_privilege('operations_cost_app', '$SCHEMA', 'CREATE')")" = "f" ] || { echo "operations_cost_app can create objects in $SCHEMA"; return 1; }
   [ "$(psql_admin -c "SELECT has_schema_privilege('operations_cost_app', '$SCHEMA', 'USAGE')")" = "t" ] || { echo "operations_cost_app cannot use $SCHEMA"; return 1; }
+}
+
+# ---- the probes of the departure (spec 001, task DB-02): what the engine refuses
+T1=00000000-0000-4000-8000-0000000000a1
+T2=00000000-0000-4000-8000-0000000000a2
+SVC=00000000-0000-4000-8000-0000000000c1
+ACTOR=00000000-0000-4000-8000-0000000000d1
+
+psql_app() { docker exec -e PGPASSWORD="$APP_PASSWORD" "$RUN_ID" psql -h 127.0.0.1 -U operations_cost_app -d "$DB" -v ON_ERROR_STOP=1 -tA "$@"; }
+
+# a statement the database must refuse, for the reason named by a fragment of its message
+refused() { # fragment, statement
+  out=$(psql_admin -c "$2" 2>&1) && { echo "the database accepted: $2"; return 1; }
+  printf '%s' "$out" | grep -q "$1" || { echo "refused, but not for the expected reason ($1): $out"; return 1; }
+}
+# one insert of a departure; each argument is a column=value override, the rest is valid
+departure() { # [column=value ...]
+  id="gen_random_uuid()"; tenant="'$T1'"; code="'SAL-001'"; service="'$SVC'"; starts="'2026-12-01 08:00:00+00'"
+  ends="'2026-12-01 18:00:00+00'"; zone="'America/Bogota'"; status="'SCHEDULED'"; by="'$ACTOR'"; at="now()"
+  for kv in "$@"; do
+    v=${kv#*=}
+    case ${kv%%=*} in
+      id) id=$v ;; tenant) tenant=$v ;; code) code=$v ;; service) service=$v ;; starts) starts=$v ;;
+      ends) ends=$v ;; zone) zone=$v ;; status) status=$v ;; by) by=$v ;; at) at=$v ;;
+      *) printf 'UNKNOWN_OVERRIDE_%s' "${kv%%=*}"; return 0 ;;
+    esac
+  done
+  printf "INSERT INTO operations_cost.salida (salida_id, tenant_id, code, service_id, starts_at, estimated_end_at, time_zone, status, scheduled_by, scheduled_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)" \
+    "$id" "$tenant" "$code" "$service" "$starts" "$ends" "$zone" "$status" "$by" "$at"
+}
+clean_departures() { psql_admin -c "TRUNCATE operations_cost.salida" >/dev/null || { echo "could not clean the departures"; return 1; }; }
+
+a_departure_missing_any_mandatory_value_is_refused() {
+  clean_departures || return 1
+  psql_admin -c "$(departure)" >/dev/null || { echo "a complete departure was refused"; return 1; }
+  for kv in id=NULL tenant=NULL code=NULL service=NULL starts=NULL ends=NULL zone=NULL status=NULL by=NULL at=NULL; do
+    refused "null value in column" "$(departure "$kv")" || { echo "  (override $kv)"; return 1; }
+  done
+  refused chk_salida_time_zone "$(departure "zone=''")" || return 1
+  refused chk_salida_time_zone "$(departure "zone='$(printf 'z%.0s' $(seq 1 65))'")" || return 1
+  psql_admin -c "$(departure "code='SAL-002'" "zone='$(printf 'z%.0s' $(seq 1 64))'")" >/dev/null || { echo "a zone of 64 characters was refused"; return 1; }
+}
+an_end_before_the_start_is_refused_and_one_days_later_is_accepted() {
+  clean_departures || return 1
+  refused chk_salida_estimated_end_at "$(departure "ends='2026-12-01 07:59:59+00'")" || return 1
+  psql_admin -c "$(departure "code='SAL-002'" "ends='2026-12-01 08:00:00+00'")" >/dev/null || { echo "an end equal to the start was refused"; return 1; }
+  psql_admin -c "$(departure "code='SAL-003'" "ends='2026-12-04 18:00:00+00'")" >/dev/null || { echo "an end three days later was refused"; return 1; }
+}
+only_the_four_states_of_the_pdr_are_accepted() {
+  clean_departures || return 1
+  n=10
+  for status in SCHEDULED IN_EXECUTION FINISHED CANCELLED; do
+    n=$((n + 1))
+    psql_admin -c "$(departure "code='SAL-0$n'" "status='$status'")" >/dev/null || { echo "the state $status was refused"; return 1; }
+  done
+  refused chk_salida_status "$(departure "code='SAL-099'" "status='PENDING_REGULARIZATION'")" || return 1
+  refused chk_salida_status "$(departure "code='SAL-098'" "status='Programada'")"
+}
+the_tenant_is_mandatory_and_indexed_with_state_and_start() {
+  clean_departures || return 1
+  psql_admin -c "$(departure)" >/dev/null || return 1
+  refused uq_salida_tenant_id_code "$(departure)" || return 1
+  psql_admin -c "$(departure "tenant='$T2'")" >/dev/null || { echo "the same code in another tenant was refused"; return 1; }
+  refused chk_salida_code "$(departure "code='SAL-1'")" || return 1
+  refused chk_salida_code "$(departure "code='sal-001'")" || return 1
+  refused chk_salida_code "$(departure "code='SAL-12'")" || return 1
+  refused chk_salida_code "$(departure "code='SAL-1234567'")" || return 1
+  psql_admin -c "$(departure "code='SAL-123456'")" >/dev/null || { echo "a code of six digits was refused"; return 1; }
+  [ "$(psql_admin -c "SELECT count(*) FROM pg_constraint WHERE connamespace = 'operations_cost'::regnamespace AND contype = 'f'")" = 0 ] \
+    || { echo "a foreign key exists: the tenant and the tour belong to other domains (Annex J.3.4)"; return 1; }
+  def=$(psql_admin -c "SELECT indexdef FROM pg_indexes WHERE schemaname = 'operations_cost' AND indexname = 'idx_salida_tenant_id_status_starts_at'")
+  case "$def" in
+    *"(tenant_id, status, starts_at)"*) ;;
+    *) echo "the index must be on (tenant_id, status, starts_at): '$def'"; return 1 ;;
+  esac
+}
+the_application_user_cannot_delete_a_departure() {
+  clean_departures || return 1
+  psql_admin -c "$(departure)" >/dev/null || return 1
+  psql_app -c "UPDATE operations_cost.salida SET status = 'CANCELLED'" >/dev/null || { echo "the application user cannot update a departure"; return 1; }
+  out=$(psql_app -c "DELETE FROM operations_cost.salida" 2>&1) && { echo "the application user deleted a departure"; return 1; }
+  printf '%s' "$out" | grep -q "permission denied" || { echo "refused, but not for a missing privilege: $out"; return 1; }
+  [ "$(psql_admin -c "SELECT count(*) FROM operations_cost.salida")" = 1 ] || { echo "the departure is gone"; return 1; }
 }
 
 # ---- the instance, as multi-tour-infra-postgres leaves it: the database, the user of the domain and another domain's schema
@@ -152,6 +246,11 @@ check "I·schema_builds_from_empty_and_nothing_lives_in_public" schema_builds_fr
 check "I·a_second_run_applies_zero_changesets" a_second_run_applies_zero_changesets
 check "I·own_control_table_no_database_service_no_volume_no_extension" own_control_table_no_database_service_no_volume_no_extension
 check "I·operations_cost_app_writes_only_its_schema" operations_cost_app_writes_only_its_schema
+check "I·a_departure_missing_any_mandatory_value_is_refused" a_departure_missing_any_mandatory_value_is_refused
+check "I·an_end_before_the_start_is_refused_and_one_days_later_is_accepted" an_end_before_the_start_is_refused_and_one_days_later_is_accepted
+check "I·only_the_four_states_of_the_pdr_are_accepted" only_the_four_states_of_the_pdr_are_accepted
+check "I·the_tenant_is_mandatory_and_indexed_with_state_and_start" the_tenant_is_mandatory_and_indexed_with_state_and_start
+check "I·the_application_user_cannot_delete_a_departure" the_application_user_cannot_delete_a_departure
 check "I·the_full_rollback_leaves_nothing_and_the_rebuild_is_identical" the_full_rollback_leaves_nothing_and_the_rebuild_is_identical
 
 [ "$fail" = 0 ] && echo "ALL CHECKS PASSED" || echo "SOME CHECKS FAILED"
