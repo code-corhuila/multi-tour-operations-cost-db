@@ -1,25 +1,59 @@
 # multi-tour-operations-cost-db
 
-> operations-cost bounded context: database (schema, seeds, migrations)
+The database of the operations-cost domain of **Multitour**: the schema `operations_cost` inside the single PostgreSQL
+instance of the platform, built and reverted with Liquibase (course norm §5.2, Annexes A and J). This repository holds
+the migrations and nothing else: the instance, its volume, its extensions and the user `operations_cost_app` belong to
+`multi-tour-infra-postgres`. Documentation lives in `multi-tour-docs` (spec 001 of this repository,
+`07-api/specs/operations-cost/multi-tour-operations-cost-db/`).
 
-Part of the **LMS Library** distributed system — team `lms-library`, Grupo 2.
-Governance and documentation live in [`library-docs`](https://github.com/code-corhuila/library-docs).
+## What it holds
+
+Today, the schema `operations_cost`, the roles `operations_cost_reader` and `operations_cost_writer` (they cannot log in and
+have no password) and the grant of the writer to `operations_cost_app`. The writer reads, inserts and updates and **never
+deletes**: a departure is cancelled, never erased. The tables of HU-OPS-001 (the departures, the outbox and the idempotency
+key) arrive in the next pull requests of the story.
+
+## How it runs
+
+The runner is the only thing in `deploy/`: Liquibase 5.0.4 with the PostgreSQL driver and the migrations copied inside its
+image. It has its own control tables, `databasechangelog_operations_cost` and `databasechangeloglock_operations_cost`, so
+two domains can migrate the same instance. It is started from the root composition of `multi-tour-infra-postgres`:
+
+```sh
+docker compose --profile tooling run --rm operations-cost-db-migrate
+```
+
+The runner reads `PG_DATABASE`, `PG_ADMIN_USER` and `PG_ADMIN_PASSWORD` from the environment file of the infrastructure.
+`.env.example` names them; a real `.env` is never versioned.
+
+## Where the data is
+
+In the schema `operations_cost` of the instance defined by `multi-tour-infra-postgres`. Nothing of this domain lives in
+`public` except the two control tables of the runner. A reference to another domain (the tenant, the tour of the catalog)
+is a stored identifier with no foreign key.
+
+## How it is tested
+
+```sh
+bash tests/db-ci.sh          # needs Docker only
+bash tests/check-structure.sh
+```
+
+`tests/db-ci.sh` starts a throwaway PostgreSQL and the runner on a private network, with passwords generated on the spot, and
+checks that the schema builds from empty and nothing of the domain lives in `public`, that a second run applies zero
+changesets, that the full rollback leaves nothing and the rebuild is identical, that the repository has its own control table
+and defines no database service, volume or extension, and that `operations_cost_app` writes only in its own schema. The same
+file is what `db-ci.yml` runs on every pull request toward `develop` and `qa`; while GitHub Actions is locked for billing the
+pull request pastes the local run instead. `tests/check-structure.sh` is the static check of `ci.yml`.
+
+## What is missing
+
+The tables of the story HU-OPS-001 (departures, outbox, idempotency key), and everything of the other stories of the domain:
+the vehicles of a departure, the start and the end of an execution, the delivered services, the costs and the cancellation.
 
 ## Branching
 
-Three permanent branches. **None of them accepts a direct commit** — you enter through a child
-branch and leave through a Pull Request.
-
-```
-develop  <--PR--  feat/... fix/... chore/...
-qa       <--PR--  qa/...
-main     <--PR--  release/...  hotfix/...
-```
-
-Promotion happens **by re-application** (`git cherry-pick -x`), never by merging one permanent
-branch into another: `merge develop -> qa` and `merge qa -> main` do not exist in this model.
-
-`main` requires **1 approval from `ariel5253`**. On `develop` and `qa` the team sets its own review
-rule.
-
-Full policy: `00-governance/branching-policy.md` in `library-docs`.
+Three permanent branches, `develop`, `qa` and `main`; none accepts a direct commit. A task enters `develop` through a
+`feat/`, `fix/` or `chore/` branch and a pull request; `qa` through `qa/` and `main` through `release/` or `hotfix/`,
+always by re-applying commits with `git cherry-pick -x`, never by merging one permanent branch into another. A commit is
+`<type>(<scope>): <description>` in lower case, and a pull request cites its story as `code-corhuila/multi-tour-docs#NN`.
