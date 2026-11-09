@@ -124,3 +124,21 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-tables-008
+      author: Molina211
+      labels: "HU-OPS-007,ddl,tables"
+      comment: "A real operational cost of a departure: calculated from the catalogued cost and the travelers served, or a real expense (spec 006)."
+      changes:
+        - sqlFile:
+            path: 008_create_salida_cost.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/008_create_salida_cost.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

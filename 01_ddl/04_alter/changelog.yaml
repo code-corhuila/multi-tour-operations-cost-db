@@ -106,3 +106,21 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-alter-007
+      author: Molina211
+      labels: "HU-OPS-007,ddl,alter"
+      comment: "The key of a cost to its departure over the tenant (spec 006)."
+      changes:
+        - sqlFile:
+            path: 007_add_salida_cost_salida_foreign_key.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/007_add_salida_cost_salida_foreign_key.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
