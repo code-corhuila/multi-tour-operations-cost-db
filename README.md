@@ -18,7 +18,8 @@ a departure is cancelled, never erased. The tables, of HU-OPS-001 and HU-OPS-002
 - `idempotency_key`: the key of a creation and the departure it created, so a repeat answers the same departure;
 - `vehicle`: the vehicles of the tenant, with a name that is unique per tenant ignoring case and a capacity from 1 to 100;
 - `salida_vehicle`: the vehicles assigned to a departure;
-- `vehicle_idempotency_key`: the key of the registration of a vehicle and the vehicle it created.
+- `vehicle_idempotency_key`: the key of the registration of a vehicle and the vehicle it created;
+- `salida_service`: what each reservation of a departure received (delivered or not, travelers served, cause, no-show), one row per reservation, replaced when saved again.
 
 The table `salida` also keeps what happened in a departure (HU-OPS-003): the real start and end, who recorded each, whether it ended as an interruption and why, the mark of pending regularization with the moment it was set (`pending_marked_at`, which stays after the mark is cleared as the anchor of the retention count), and, when a person regularized it, who and when (`regularized_by`, `regularized_at`) and why it started earlier than scheduled (`early_start_reason`). The engine checks that they agree with the state; a partial index, `idx_salida_open_past_end`, finds the open departures that job 3 has not marked yet.
 
