@@ -70,3 +70,21 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-alter-005
+      author: Molina211
+      labels: "HU-OPS-003,ddl,alter"
+      comment: "The moment of the mark, who regularized and when, and the reason of an early start; nullable columns, so the existing rows stay valid (spec 004)."
+      changes:
+        - sqlFile:
+            path: 005_add_salida_regularization.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/005_add_salida_regularization.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
