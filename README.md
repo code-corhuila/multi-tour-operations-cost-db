@@ -20,7 +20,7 @@ a departure is cancelled, never erased. The tables, of HU-OPS-001 and HU-OPS-002
 - `salida_vehicle`: the vehicles assigned to a departure;
 - `vehicle_idempotency_key`: the key of the registration of a vehicle and the vehicle it created.
 
-The table `salida` also keeps what happened in a departure (HU-OPS-003): the real start and end, who recorded each, whether it ended as an interruption and why, and the mark of pending regularization. The engine checks that they agree with the state.
+The table `salida` also keeps what happened in a departure (HU-OPS-003): the real start and end, who recorded each, whether it ended as an interruption and why, the mark of pending regularization with the moment it was set (`pending_marked_at`, which stays after the mark is cleared as the anchor of the retention count), and, when a person regularized it, who and when (`regularized_by`, `regularized_at`) and why it started earlier than scheduled (`early_start_reason`). The engine checks that they agree with the state; a partial index, `idx_salida_open_past_end`, finds the open departures that job 3 has not marked yet.
 
 ## How it runs
 
@@ -57,8 +57,8 @@ pull request pastes the local run instead. `tests/check-structure.sh` is the sta
 
 ## What is missing
 
-Everything of the other stories of the domain: removing a vehicle from a departure (HU-OPS-002 part B, it will need its own grant to delete), the mark of pending
-regularization that job 3 will set (the column exists and nothing writes it yet), the delivered services, the costs and the cancellation.
+Everything of the other stories of the domain: removing a vehicle from a departure (HU-OPS-002 part B, it will need its own grant to delete), the columns that cancelling a
+departure will need (HU-OPS-006), the delivered services and the costs.
 
 ## Branching
 
