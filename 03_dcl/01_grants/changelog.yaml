@@ -16,3 +16,21 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: operations-cost-dcl-grants-002
+      author: Molina211
+      labels: "HU-OPS-007,dcl,grants"
+      comment: "A cost is never rewritten: the writer loses UPDATE on it (spec 006, plan D-07)."
+      changes:
+        - sqlFile:
+            path: 002_revoke_cost_update.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/03_dcl/01_grants/002_revoke_cost_update.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
