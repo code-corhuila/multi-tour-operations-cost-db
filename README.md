@@ -57,8 +57,8 @@ pull request pastes the local run instead. `tests/check-structure.sh` is the sta
 
 ## What is missing
 
-Everything of the other stories of the domain: removing a vehicle from a departure (HU-OPS-002 part B, it will need its own grant to delete), the start and the end of an
-execution, the delivered services, the costs and the cancellation.
+Everything of the other stories of the domain: removing a vehicle from a departure (HU-OPS-002 part B, it will need its own grant to delete), the mark of pending
+regularization that job 3 will set (the column exists and nothing writes it yet), the delivered services, the costs and the cancellation.
 
 ## Branching
 
