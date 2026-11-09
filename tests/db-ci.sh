@@ -30,6 +30,14 @@
 #   I·an_undelivered_service_has_its_cause_and_a_no_show_is_undelivered      AC-DB-05.3
 #   I·a_service_belongs_to_a_departure_of_its_tenant                         AC-DB-05.4
 #   I·the_application_user_records_but_never_deletes_a_service               AC-DB-05.6
+# Checks of spec 006 (HU-OPS-007, the operational costs):
+#   I·the_cost_table_keeps_many_lines_per_departure                          AC-DB-06.1
+#   I·a_cost_needs_a_concept_and_an_amount_above_zero                        AC-DB-06.2
+#   I·a_calculated_cost_is_the_unit_cost_times_the_travelers_and_a_manual_one_has_neither  AC-DB-06.3
+#   I·a_cost_without_a_catalogued_cost_is_manual_and_justified               AC-DB-06.4
+#   I·a_cost_belongs_to_a_departure_of_its_tenant                            AC-DB-06.5
+#   I·a_cost_key_is_unique_in_a_tenant_and_8_to_128_characters               AC-DB-06.6
+#   I·the_application_user_records_but_never_changes_a_cost                  AC-DB-06.8
 # Checks of spec 004 (HU-OPS-003 part B, the mark and the regularization):
 #   I·the_regularization_columns_exist_and_an_old_departure_has_none     AC-DB-04.1
 #   I·the_mark_needs_its_moment_and_only_marks_an_open_departure         AC-DB-04.2
@@ -206,7 +214,7 @@ ENDED="actual_end_at='2026-12-01 17:30:00+00'"
 # (the vehicle tables are included when they exist, so the checks of spec 001 also run on a schema without them)
 clean_departures() {
   tables=$(psql_admin -c "SELECT string_agg(format('%I.%I', schemaname, tablename), ',') FROM pg_tables
-    WHERE schemaname = '$SCHEMA' AND tablename IN ('idempotency_key', 'salida', 'salida_vehicle', 'vehicle', 'vehicle_idempotency_key', 'salida_service')")
+    WHERE schemaname = '$SCHEMA' AND tablename IN ('idempotency_key', 'salida', 'salida_vehicle', 'vehicle', 'vehicle_idempotency_key', 'salida_service', 'salida_cost')")
   psql_admin -c "TRUNCATE $tables" >/dev/null || { echo "could not clean the departures"; return 1; }
 }
 
@@ -570,6 +578,78 @@ the_application_user_records_but_never_deletes_a_service() {
   printf '%s' "$out" | grep -q "permission denied" || { echo "refused, but not for a missing privilege: $out"; return 1; }
 }
 
+cost() { # [column=value ...]: a cost line of the departure S1, a real expense unless overridden
+  tenant="'$T1'"; sid="'$S1'"; concept="'Fuel of the boat'"; amount=50000; mode="'MANUAL'"; unit="NULL"; served="NULL"
+  wop=false; just="NULL"; key="gen_random_uuid()::text"; by="'$ACTOR'"
+  for kv in "$@"; do
+    v=${kv#*=}
+    case ${kv%%=*} in
+      tenant) tenant=$v ;; sid) sid=$v ;; concept) concept=$v ;; amount) amount=$v ;; mode) mode=$v ;; unit) unit=$v ;; served) served=$v ;;
+      wop) wop=$v ;; just) just=$v ;; key) key=$v ;; by) by=$v ;;
+      *) printf 'UNKNOWN_OVERRIDE_%s' "${kv%%=*}"; return 0 ;;
+    esac
+  done
+  printf "INSERT INTO operations_cost.salida_cost (cost_id, tenant_id, salida_id, concept, amount_cents, mode, unit_cost_cents, travelers_served, without_parametrization, justification, idempotency_key, recorded_by, recorded_at) VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())" \
+    "$tenant" "$sid" "$concept" "$amount" "$mode" "$unit" "$served" "$wop" "$just" "$key" "$by"
+}
+the_cost_table_keeps_many_lines_per_departure() {
+  a_running_departure || return 1
+  psql_admin -c "$(cost)" >/dev/null || { echo "a valid cost was refused"; return 1; }
+  psql_admin -c "$(cost)" >/dev/null || { echo "a second cost of the same departure was refused"; return 1; }
+  [ "$(psql_admin -c "SELECT count(*) FROM information_schema.columns WHERE table_schema = '$SCHEMA' AND table_name = 'salida_cost'")" = 13 ] || { echo "the table does not have the thirteen columns"; return 1; }
+}
+a_cost_needs_a_concept_and_an_amount_above_zero() {
+  a_running_departure || return 1
+  refused chk_salida_cost_concept "$(cost "concept=''")" || return 1
+  refused chk_salida_cost_concept "$(cost "concept='$(printf 'c%.0s' $(seq 1 201))'")" || return 1
+  refused chk_salida_cost_amount "$(cost amount=0)" || return 1
+  refused chk_salida_cost_amount "$(cost amount=-5)" || return 1
+  psql_admin -c "$(cost "concept='$(printf 'c%.0s' $(seq 1 200))'")" >/dev/null || { echo "a concept of 200 characters was refused"; return 1; }
+}
+a_calculated_cost_is_the_unit_cost_times_the_travelers_and_a_manual_one_has_neither() {
+  a_running_departure || return 1
+  psql_admin -c "$(cost "mode='CALCULATED'" unit=1000 served=3 amount=3000)" >/dev/null || { echo "a valid calculated cost was refused"; return 1; }
+  refused chk_salida_cost_calculation "$(cost "mode='CALCULATED'" unit=1000 served=3 amount=2999)" || return 1
+  refused chk_salida_cost_calculation "$(cost "mode='CALCULATED'" unit=1000 served=0 amount=0)" || return 1
+  refused chk_salida_cost_calculation "$(cost "mode='CALCULATED'" served=3 amount=3000)" || return 1
+  refused chk_salida_cost_calculation "$(cost unit=1000)" || return 1
+  refused chk_salida_cost_calculation "$(cost served=3)" || return 1
+  refused chk_salida_cost "$(cost "mode='OTHER'")" || return 1
+}
+a_cost_without_a_catalogued_cost_is_manual_and_justified() {
+  a_running_departure || return 1
+  psql_admin -c "$(cost wop=true "just='No catalogued cost, paid at the dock'")" >/dev/null || { echo "a justified cost without parametrization was refused"; return 1; }
+  refused chk_salida_cost_justification "$(cost wop=true)" || return 1
+  refused chk_salida_cost_justification "$(cost wop=true "just=''")" || return 1
+  refused chk_salida_cost_justification "$(cost wop=true "just='$(printf 'j%.0s' $(seq 1 501))'")" || return 1
+  refused chk_salida_cost_justification "$(cost "just='a justification with a catalogued cost'")" || return 1
+  refused chk_salida_cost_justification "$(cost "mode='CALCULATED'" unit=1000 served=3 amount=3000 wop=true "just='x'")" || return 1
+}
+a_cost_belongs_to_a_departure_of_its_tenant() {
+  a_running_departure || return 1
+  refused fk_salida_cost_salida "$(cost "sid='00000000-0000-4000-8000-0000000000ff'")" || return 1
+  refused fk_salida_cost_salida "$(cost "tenant='$T2'")" || return 1
+  psql_admin -c "$(cost)" >/dev/null || return 1
+  refused fk_salida_cost_salida "DELETE FROM operations_cost.salida WHERE salida_id = '$S1'" || return 1
+  [ "$(psql_admin -c "SELECT count(*) FROM pg_indexes WHERE schemaname = '$SCHEMA' AND tablename = 'salida_cost' AND indexname = 'idx_salida_cost_tenant_id_salida_id'")" = 1 ] || { echo "the index of the key is missing"; return 1; }
+}
+a_cost_key_is_unique_in_a_tenant_and_8_to_128_characters() {
+  a_running_departure || return 1
+  psql_admin -c "$(cost "key='cost-key-0001'")" >/dev/null || { echo "a valid key was refused"; return 1; }
+  refused uq_salida_cost_tenant_key "$(cost "key='cost-key-0001'")" || return 1
+  refused chk_salida_cost_key_length "$(cost "key='abcdefg'")" || return 1
+  refused chk_salida_cost_key_length "$(cost "key='$(printf 'k%.0s' $(seq 1 129))'")" || return 1
+}
+the_application_user_records_but_never_changes_a_cost() {
+  a_running_departure || return 1
+  psql_app -c "$(cost)" >/dev/null || { echo "the application user cannot insert a cost"; return 1; }
+  [ "$(psql_app -c "SELECT count(*) FROM operations_cost.salida_cost")" = 1 ] || { echo "the application user cannot read a cost"; return 1; }
+  for statement in "UPDATE operations_cost.salida_cost SET amount_cents = 1" "DELETE FROM operations_cost.salida_cost"; do
+    out=$(psql_app -c "$statement" 2>&1) && { echo "the application user changed a cost: $statement"; return 1; }
+    printf '%s' "$out" | grep -q "permission denied" || { echo "refused, but not for a missing privilege: $out"; return 1; }
+  done
+}
+
 # ---- the instance, as multi-tour-infra-postgres leaves it: the database, the user of the domain and another domain's schema
 docker network create "$RUN_ID" >/dev/null || exit 1
 docker run -d --name "$RUN_ID" --network "$RUN_ID" -e POSTGRES_PASSWORD="$ADMIN_PASSWORD" -e POSTGRES_DB="$DB" "$POSTGRES_IMAGE" >/dev/null || exit 1
@@ -619,6 +699,13 @@ check "I·a_result_and_its_travelers_served_agree" a_result_and_its_travelers_se
 check "I·an_undelivered_service_has_its_cause_and_a_no_show_is_undelivered" an_undelivered_service_has_its_cause_and_a_no_show_is_undelivered
 check "I·a_service_belongs_to_a_departure_of_its_tenant" a_service_belongs_to_a_departure_of_its_tenant
 check "I·the_application_user_records_but_never_deletes_a_service" the_application_user_records_but_never_deletes_a_service
+check "I·the_cost_table_keeps_many_lines_per_departure" the_cost_table_keeps_many_lines_per_departure
+check "I·a_cost_needs_a_concept_and_an_amount_above_zero" a_cost_needs_a_concept_and_an_amount_above_zero
+check "I·a_calculated_cost_is_the_unit_cost_times_the_travelers_and_a_manual_one_has_neither" a_calculated_cost_is_the_unit_cost_times_the_travelers_and_a_manual_one_has_neither
+check "I·a_cost_without_a_catalogued_cost_is_manual_and_justified" a_cost_without_a_catalogued_cost_is_manual_and_justified
+check "I·a_cost_belongs_to_a_departure_of_its_tenant" a_cost_belongs_to_a_departure_of_its_tenant
+check "I·a_cost_key_is_unique_in_a_tenant_and_8_to_128_characters" a_cost_key_is_unique_in_a_tenant_and_8_to_128_characters
+check "I·the_application_user_records_but_never_changes_a_cost" the_application_user_records_but_never_changes_a_cost
 check "I·the_full_rollback_leaves_nothing_and_the_rebuild_is_identical" the_full_rollback_leaves_nothing_and_the_rebuild_is_identical
 
 [ "$fail" = 0 ] && echo "ALL CHECKS PASSED" || echo "SOME CHECKS FAILED"
