@@ -610,8 +610,9 @@ a_calculated_cost_is_the_unit_cost_times_the_travelers_and_a_manual_one_has_neit
   a_running_departure || return 1
   psql_admin -c "$(cost "mode='CALCULATED'" unit=1000 served=3 amount=3000)" >/dev/null || { echo "a valid calculated cost was refused"; return 1; }
   refused chk_salida_cost_calculation "$(cost "mode='CALCULATED'" unit=1000 served=3 amount=2999)" || return 1
-  refused chk_salida_cost_calculation "$(cost "mode='CALCULATED'" unit=1000 served=0 amount=0)" || return 1
+  refused chk_salida_cost_calculation "$(cost "mode='CALCULATED'" unit=1000 served=0 amount=1000)" || return 1
   refused chk_salida_cost_calculation "$(cost "mode='CALCULATED'" served=3 amount=3000)" || return 1
+  refused chk_salida_cost_calculation "$(cost "mode='CALCULATED'" unit=1000 amount=1000)" || return 1
   refused chk_salida_cost_calculation "$(cost unit=1000)" || return 1
   refused chk_salida_cost_calculation "$(cost served=3)" || return 1
   refused chk_salida_cost "$(cost "mode='OTHER'")" || return 1
