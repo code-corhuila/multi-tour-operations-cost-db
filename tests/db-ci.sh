@@ -311,7 +311,8 @@ the_application_user_records_the_execution() {
 
 # ---- the probes of the mark and the regularization (spec 004, HU-OPS-003 part B)
 MARKED="pending_marked_at='2026-12-01 18:15:00+00'"
-REGULARIZED="regularized_by='$ACTOR' regularized_at='2026-12-02 09:00:00+00'"
+REG_BY="regularized_by='$ACTOR'"
+REG_AT="regularized_at='2026-12-02 09:00:00+00'"
 finished() { # [column=value ...]: a finished departure with its start and end, regularized as given
   departure "status='FINISHED'" "$STARTED" "started_by='$ACTOR'" "$ENDED" "finished_by='$ACTOR'" "$@"
 }
@@ -335,15 +336,15 @@ who_regularized_and_when_go_together_on_a_finished_departure() {
   clean_departures || return 1
   refused chk_salida_regularization "$(finished "regularized_by='$ACTOR'")" || return 1
   refused chk_salida_regularization "$(finished "regularized_at='2026-12-02 09:00:00+00'")" || return 1
-  refused chk_salida_regularization "$(departure $REGULARIZED)" || return 1
-  psql_admin -c "$(finished $REGULARIZED)" >/dev/null || { echo "a finished departure with who and when was refused"; return 1; }
+  refused chk_salida_regularization "$(departure "$REG_BY" "$REG_AT")" || return 1
+  psql_admin -c "$(finished "$REG_BY" "$REG_AT")" >/dev/null || { echo "a finished departure with who and when was refused"; return 1; }
 }
 an_early_start_reason_is_of_a_regularization_and_up_to_500() {
   clean_departures || return 1
   refused chk_salida_early_start_reason "$(finished "early_start_reason='Salio temprano'")" || return 1
-  refused chk_salida_early_start_reason "$(finished $REGULARIZED "early_start_reason=''")" || return 1
-  refused chk_salida_early_start_reason "$(finished $REGULARIZED "early_start_reason=repeat('x',501)")" || return 1
-  psql_admin -c "$(finished $REGULARIZED "early_start_reason=repeat('x',500)")" >/dev/null || { echo "a reason of 500 characters was refused"; return 1; }
+  refused chk_salida_early_start_reason "$(finished "$REG_BY" "$REG_AT" "early_start_reason=''")" || return 1
+  refused chk_salida_early_start_reason "$(finished "$REG_BY" "$REG_AT" "early_start_reason=repeat('x',501)")" || return 1
+  psql_admin -c "$(finished "$REG_BY" "$REG_AT" "early_start_reason=repeat('x',500)")" >/dev/null || { echo "a reason of 500 characters was refused"; return 1; }
 }
 the_departures_past_their_end_are_found_through_a_partial_index() {
   clean_departures || return 1
