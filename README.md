@@ -20,6 +20,8 @@ a departure is cancelled, never erased. The tables, of HU-OPS-001 and HU-OPS-002
 - `salida_vehicle`: the vehicles assigned to a departure;
 - `vehicle_idempotency_key`: the key of the registration of a vehicle and the vehicle it created.
 
+The table `salida` also keeps what happened in a departure (HU-OPS-003): the real start and end, who recorded each, whether it ended as an interruption and why, and the mark of pending regularization. The engine checks that they agree with the state.
+
 ## How it runs
 
 The runner is the only thing in `deploy/`: Liquibase 5.0.4 with the PostgreSQL driver and the migrations copied inside its
