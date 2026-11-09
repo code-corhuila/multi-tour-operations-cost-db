@@ -24,6 +24,12 @@
 #   I·an_end_goes_with_a_finished_departure_after_its_start            AC-DB-03.3
 #   I·an_interruption_finishes_the_departure_with_its_cause            AC-DB-03.4
 #   I·the_application_user_records_the_execution                       AC-DB-03.6
+# Checks of spec 005 (HU-OPS-004, the delivered and the undelivered services):
+#   I·the_service_table_exists_with_one_row_per_reservation_of_a_departure   AC-DB-05.1
+#   I·a_result_and_its_travelers_served_agree                                AC-DB-05.2
+#   I·an_undelivered_service_has_its_cause_and_a_no_show_is_undelivered      AC-DB-05.3
+#   I·a_service_belongs_to_a_departure_of_its_tenant                         AC-DB-05.4
+#   I·the_application_user_records_but_never_deletes_a_service               AC-DB-05.6
 # Checks of spec 004 (HU-OPS-003 part B, the mark and the regularization):
 #   I·the_regularization_columns_exist_and_an_old_departure_has_none     AC-DB-04.1
 #   I·the_mark_needs_its_moment_and_only_marks_an_open_departure         AC-DB-04.2
@@ -200,7 +206,7 @@ ENDED="actual_end_at='2026-12-01 17:30:00+00'"
 # (the vehicle tables are included when they exist, so the checks of spec 001 also run on a schema without them)
 clean_departures() {
   tables=$(psql_admin -c "SELECT string_agg(format('%I.%I', schemaname, tablename), ',') FROM pg_tables
-    WHERE schemaname = '$SCHEMA' AND tablename IN ('idempotency_key', 'salida', 'salida_vehicle', 'vehicle', 'vehicle_idempotency_key')")
+    WHERE schemaname = '$SCHEMA' AND tablename IN ('idempotency_key', 'salida', 'salida_vehicle', 'vehicle', 'vehicle_idempotency_key', 'salida_service')")
   psql_admin -c "TRUNCATE $tables" >/dev/null || { echo "could not clean the departures"; return 1; }
 }
 
@@ -508,6 +514,62 @@ a_vehicle_key_is_unique_8_to_128_characters_and_points_to_its_vehicle() {
   psql_app -c "$(vehicle_key createVehicle/$T1 appkey001 $V1)" >/dev/null || { echo "the application user cannot write a vehicle key"; return 1; }
 }
 
+service() { # salida id, reservation id, [column=value ...]: the record of a reservation of a departure, valid unless overridden
+  sid=$1; rid=$2; shift 2
+  tenant="'$T1'"; result="'DELIVERED'"; served=2; cause="NULL"; noshow=false; by="'$ACTOR'"; at="now()"
+  for kv in "$@"; do
+    v=${kv#*=}
+    case ${kv%%=*} in
+      tenant) tenant=$v ;; result) result=$v ;; served) served=$v ;; cause) cause=$v ;; noshow) noshow=$v ;; by) by=$v ;; at) at=$v ;;
+      *) printf 'UNKNOWN_OVERRIDE_%s' "${kv%%=*}"; return 0 ;;
+    esac
+  done
+  printf "INSERT INTO operations_cost.salida_service (tenant_id, salida_id, reservation_id, result, travelers_served, cause, no_show, recorded_by, recorded_at) VALUES (%s, '%s', '%s', %s, %s, %s, %s, %s, %s)"     "$tenant" "$sid" "$rid" "$result" "$served" "$cause" "$noshow" "$by" "$at"
+}
+S1=00000000-0000-4000-8000-0000000000a1
+R1=00000000-0000-4000-8000-0000000000b1
+R2=00000000-0000-4000-8000-0000000000b2
+a_running_departure() { clean_departures || return 1; psql_admin -c "$(departure "id='$S1'" "status='IN_EXECUTION'" "$STARTED" "started_by='$ACTOR'")" >/dev/null || { echo "could not insert a departure"; return 1; }; }
+the_service_table_exists_with_one_row_per_reservation_of_a_departure() {
+  a_running_departure || return 1
+  psql_admin -c "$(service $S1 $R1)" >/dev/null || { echo "a valid record was refused"; return 1; }
+  psql_admin -c "$(service $S1 $R2)" >/dev/null || { echo "a second reservation of the same departure was refused"; return 1; }
+  refused pk_salida_service "$(service $S1 $R1)" || return 1
+  [ "$(psql_admin -c "SELECT count(*) FROM information_schema.columns WHERE table_schema = '$SCHEMA' AND table_name = 'salida_service'")" = 9 ] || { echo "the table does not have the nine columns"; return 1; }
+}
+a_result_and_its_travelers_served_agree() {
+  a_running_departure || return 1
+  refused chk_salida_service_result "$(service $S1 $R1 "result='MAYBE'")" || return 1
+  refused chk_salida_service_travelers "$(service $S1 $R1 served=-1)" || return 1
+  refused chk_salida_service_travelers "$(service $S1 $R1 "result='NOT_DELIVERED'" served=1 "cause='did not come'")" || return 1
+  refused chk_salida_service_travelers "$(service $S1 $R1 served=0)" || return 1
+  psql_admin -c "$(service $S1 $R1 "result='NOT_DELIVERED'" served=0 "cause='did not come'")" >/dev/null || { echo "a valid undelivered record was refused"; return 1; }
+}
+an_undelivered_service_has_its_cause_and_a_no_show_is_undelivered() {
+  a_running_departure || return 1
+  refused chk_salida_service_cause "$(service $S1 $R1 "result='NOT_DELIVERED'" served=0)" || return 1
+  refused chk_salida_service_cause "$(service $S1 $R1 "result='NOT_DELIVERED'" served=0 "cause=''")" || return 1
+  refused chk_salida_service_cause "$(service $S1 $R1 "result='NOT_DELIVERED'" served=0 "cause='$(printf 'c%.0s' $(seq 1 501))'")" || return 1
+  refused chk_salida_service_no_show "$(service $S1 $R1 noshow=true)" || return 1
+  psql_admin -c "$(service $S1 $R1 "result='NOT_DELIVERED'" served=0 "cause='no notice'" noshow=true)" >/dev/null || { echo "a valid no-show was refused"; return 1; }
+  psql_admin -c "$(service $S1 $R2 served=1 "cause='one traveler stayed'")" >/dev/null || { echo "a partial delivery with its cause was refused"; return 1; }
+}
+a_service_belongs_to_a_departure_of_its_tenant() {
+  a_running_departure || return 1
+  refused fk_salida_service_salida "$(service 00000000-0000-4000-8000-0000000000ff $R1)" || return 1
+  refused fk_salida_service_salida "$(service $S1 $R1 "tenant='$T2'")" || return 1
+  psql_admin -c "$(service $S1 $R1)" >/dev/null || return 1
+  refused fk_salida_service_salida "DELETE FROM operations_cost.salida WHERE salida_id = '$S1'" || return 1
+  [ "$(psql_admin -c "SELECT count(*) FROM pg_indexes WHERE schemaname = '$SCHEMA' AND tablename = 'salida_service' AND indexname = 'idx_salida_service_tenant_id_salida_id'")" = 1 ] || { echo "the index of the key is missing"; return 1; }
+}
+the_application_user_records_but_never_deletes_a_service() {
+  a_running_departure || return 1
+  psql_app -c "$(service $S1 $R1)" >/dev/null || { echo "the application user cannot insert a record"; return 1; }
+  psql_app -c "UPDATE operations_cost.salida_service SET travelers_served = 1, recorded_at = now()" >/dev/null || { echo "the application user cannot replace a record"; return 1; }
+  out=$(psql_app -c "DELETE FROM operations_cost.salida_service" 2>&1) && { echo "the application user deleted a record"; return 1; }
+  printf '%s' "$out" | grep -q "permission denied" || { echo "refused, but not for a missing privilege: $out"; return 1; }
+}
+
 # ---- the instance, as multi-tour-infra-postgres leaves it: the database, the user of the domain and another domain's schema
 docker network create "$RUN_ID" >/dev/null || exit 1
 docker run -d --name "$RUN_ID" --network "$RUN_ID" -e POSTGRES_PASSWORD="$ADMIN_PASSWORD" -e POSTGRES_DB="$DB" "$POSTGRES_IMAGE" >/dev/null || exit 1
@@ -552,6 +614,11 @@ check "I·who_regularized_and_when_go_together_on_a_finished_departure" who_regu
 check "I·an_early_start_reason_is_of_a_regularization_and_up_to_500" an_early_start_reason_is_of_a_regularization_and_up_to_500
 check "I·the_departures_past_their_end_are_found_through_a_partial_index" the_departures_past_their_end_are_found_through_a_partial_index
 check "I·the_application_user_marks_and_regularizes" the_application_user_marks_and_regularizes
+check "I·the_service_table_exists_with_one_row_per_reservation_of_a_departure" the_service_table_exists_with_one_row_per_reservation_of_a_departure
+check "I·a_result_and_its_travelers_served_agree" a_result_and_its_travelers_served_agree
+check "I·an_undelivered_service_has_its_cause_and_a_no_show_is_undelivered" an_undelivered_service_has_its_cause_and_a_no_show_is_undelivered
+check "I·a_service_belongs_to_a_departure_of_its_tenant" a_service_belongs_to_a_departure_of_its_tenant
+check "I·the_application_user_records_but_never_deletes_a_service" the_application_user_records_but_never_deletes_a_service
 check "I·the_full_rollback_leaves_nothing_and_the_rebuild_is_identical" the_full_rollback_leaves_nothing_and_the_rebuild_is_identical
 
 [ "$fail" = 0 ] && echo "ALL CHECKS PASSED" || echo "SOME CHECKS FAILED"
