@@ -24,6 +24,13 @@
 #   I·an_end_goes_with_a_finished_departure_after_its_start            AC-DB-03.3
 #   I·an_interruption_finishes_the_departure_with_its_cause            AC-DB-03.4
 #   I·the_application_user_records_the_execution                       AC-DB-03.6
+# Checks of spec 004 (HU-OPS-003 part B, the mark and the regularization):
+#   I·the_regularization_columns_exist_and_an_old_departure_has_none     AC-DB-04.1
+#   I·the_mark_needs_its_moment_and_only_marks_an_open_departure         AC-DB-04.2
+#   I·who_regularized_and_when_go_together_on_a_finished_departure       AC-DB-04.3
+#   I·an_early_start_reason_is_of_a_regularization_and_up_to_500         AC-DB-04.4
+#   I·the_departures_past_their_end_are_found_through_a_partial_index    AC-DB-04.5
+#   I·the_application_user_marks_and_regularizes                         AC-DB-04.7
 #
 # It starts its own throwaway PostgreSQL (the image of multi-tour-infra-postgres) and builds the runner image of
 # deploy/Dockerfile on a private network, with passwords generated now, so it touches nothing else and writes no
@@ -178,7 +185,7 @@ departure() { # [column=value ...]
     case ${kv%%=*} in
       id) id=$v ;; tenant) tenant=$v ;; code) code=$v ;; service) service=$v ;; starts) starts=$v ;;
       ends) ends=$v ;; zone) zone=$v ;; status) status=$v ;; by) by=$v ;; at) at=$v ;;
-      actual_start_at|started_by|actual_end_at|finished_by|interrupted|interruption_cause|pending_regularization)
+      actual_start_at|started_by|actual_end_at|finished_by|interrupted|interruption_cause|pending_regularization|pending_marked_at|regularized_by|regularized_at|early_start_reason)
         extra_cols="$extra_cols, ${kv%%=*}"; extra_vals="$extra_vals, $v" ;;
       *) printf 'UNKNOWN_OVERRIDE_%s' "${kv%%=*}"; return 0 ;;
     esac
@@ -300,6 +307,57 @@ the_application_user_records_the_execution() {
     || { echo "the application user cannot record a start"; return 1; }
   psql_app -c "UPDATE operations_cost.salida SET status = 'FINISHED', actual_end_at = now(), finished_by = '$ACTOR', interrupted = true, interruption_cause = 'Lluvia'" >/dev/null \
     || { echo "the application user cannot record an interrupted end"; return 1; }
+}
+
+# ---- the probes of the mark and the regularization (spec 004, HU-OPS-003 part B)
+MARKED="pending_marked_at='2026-12-01 18:15:00+00'"
+REG_BY="regularized_by='$ACTOR'"
+REG_AT="regularized_at='2026-12-02 09:00:00+00'"
+finished() { # [column=value ...]: a finished departure with its start and end, regularized as given
+  departure "status='FINISHED'" "$STARTED" "started_by='$ACTOR'" "$ENDED" "finished_by='$ACTOR'" "$@"
+}
+the_regularization_columns_exist_and_an_old_departure_has_none() {
+  clean_departures || return 1
+  cols=$(psql_admin -c "SELECT string_agg(column_name || ':' || is_nullable, ',' ORDER BY column_name) FROM information_schema.columns
+    WHERE table_schema = 'operations_cost' AND table_name = 'salida' AND column_name IN ('pending_marked_at', 'regularized_by',
+    'regularized_at', 'early_start_reason')")
+  [ "$cols" = "early_start_reason:YES,pending_marked_at:YES,regularized_at:YES,regularized_by:YES" ]     || { echo "the regularization columns are not as the plan says: '$cols'"; return 1; }
+  psql_admin -c "$(departure)" >/dev/null || { echo "a departure without regularization was refused"; return 1; }
+  [ "$(psql_admin -c "SELECT pending_marked_at IS NULL, regularized_by IS NULL, regularized_at IS NULL, early_start_reason IS NULL FROM operations_cost.salida")" = "t|t|t|t" ]     || { echo "a departure without regularization has a value in a new column"; return 1; }
+}
+the_mark_needs_its_moment_and_only_marks_an_open_departure() {
+  clean_departures || return 1
+  refused chk_salida_pending_mark "$(departure "pending_regularization=true")" || return 1
+  refused chk_salida_pending_mark "$(finished "pending_regularization=true" "$MARKED")" || return 1
+  psql_admin -c "$(departure "pending_regularization=true" "$MARKED")" >/dev/null || { echo "a scheduled departure with its mark was refused"; return 1; }
+  psql_admin -c "$(finished "$MARKED" "code='SAL-002'")" >/dev/null || { echo "a finished departure keeping the moment of its mark was refused"; return 1; }
+}
+who_regularized_and_when_go_together_on_a_finished_departure() {
+  clean_departures || return 1
+  refused chk_salida_regularization "$(finished "regularized_by='$ACTOR'")" || return 1
+  refused chk_salida_regularization "$(finished "regularized_at='2026-12-02 09:00:00+00'")" || return 1
+  refused chk_salida_regularization "$(departure "$REG_BY" "$REG_AT")" || return 1
+  psql_admin -c "$(finished "$REG_BY" "$REG_AT")" >/dev/null || { echo "a finished departure with who and when was refused"; return 1; }
+}
+an_early_start_reason_is_of_a_regularization_and_up_to_500() {
+  clean_departures || return 1
+  refused chk_salida_early_start_reason "$(finished "early_start_reason='Salio temprano'")" || return 1
+  refused chk_salida_early_start_reason "$(finished "$REG_BY" "$REG_AT" "early_start_reason=''")" || return 1
+  refused chk_salida_early_start_reason "$(finished "$REG_BY" "$REG_AT" "early_start_reason=repeat('x',501)")" || return 1
+  psql_admin -c "$(finished "$REG_BY" "$REG_AT" "early_start_reason=repeat('x',500)")" >/dev/null || { echo "a reason of 500 characters was refused"; return 1; }
+}
+the_departures_past_their_end_are_found_through_a_partial_index() {
+  clean_departures || return 1
+  def=$(psql_admin -c "SELECT indexdef FROM pg_indexes WHERE schemaname = 'operations_cost' AND indexname = 'idx_salida_open_past_end'")
+  printf '%s' "$def" | grep -q "estimated_end_at" && printf '%s' "$def" | grep -q "WHERE"     || { echo "idx_salida_open_past_end is not a partial index of estimated_end_at: '$def'"; return 1; }
+  plan=$(psql_admin -c "SET enable_seqscan = off; EXPLAIN SELECT salida_id FROM operations_cost.salida WHERE status IN ('SCHEDULED', 'IN_EXECUTION') AND NOT pending_regularization AND estimated_end_at <= now() ORDER BY estimated_end_at LIMIT 100")
+  printf '%s' "$plan" | grep -q "idx_salida_open_past_end" || { echo "the search of job 3 does not use the partial index: $plan"; return 1; }
+}
+the_application_user_marks_and_regularizes() {
+  clean_departures || return 1
+  psql_admin -c "$(departure)" >/dev/null || return 1
+  psql_app -c "UPDATE operations_cost.salida SET pending_regularization = true, pending_marked_at = now()" >/dev/null     || { echo "the application user cannot mark"; return 1; }
+  psql_app -c "UPDATE operations_cost.salida SET status = 'FINISHED', pending_regularization = false, actual_start_at = now() - interval '2 hours', started_by = '$ACTOR', actual_end_at = now(), finished_by = '$ACTOR', regularized_by = '$ACTOR', regularized_at = now(), early_start_reason = 'Salio antes'" >/dev/null     || { echo "the application user cannot regularize"; return 1; }
 }
 
 # ---- the probes of the outbox and of the idempotency key (spec 001, task DB-03)
@@ -488,6 +546,12 @@ check "I·a_start_goes_with_the_execution_and_who_recorded_it" a_start_goes_with
 check "I·an_end_goes_with_a_finished_departure_after_its_start" an_end_goes_with_a_finished_departure_after_its_start
 check "I·an_interruption_finishes_the_departure_with_its_cause" an_interruption_finishes_the_departure_with_its_cause
 check "I·the_application_user_records_the_execution" the_application_user_records_the_execution
+check "I·the_regularization_columns_exist_and_an_old_departure_has_none" the_regularization_columns_exist_and_an_old_departure_has_none
+check "I·the_mark_needs_its_moment_and_only_marks_an_open_departure" the_mark_needs_its_moment_and_only_marks_an_open_departure
+check "I·who_regularized_and_when_go_together_on_a_finished_departure" who_regularized_and_when_go_together_on_a_finished_departure
+check "I·an_early_start_reason_is_of_a_regularization_and_up_to_500" an_early_start_reason_is_of_a_regularization_and_up_to_500
+check "I·the_departures_past_their_end_are_found_through_a_partial_index" the_departures_past_their_end_are_found_through_a_partial_index
+check "I·the_application_user_marks_and_regularizes" the_application_user_marks_and_regularizes
 check "I·the_full_rollback_leaves_nothing_and_the_rebuild_is_identical" the_full_rollback_leaves_nothing_and_the_rebuild_is_identical
 
 [ "$fail" = 0 ] && echo "ALL CHECKS PASSED" || echo "SOME CHECKS FAILED"
