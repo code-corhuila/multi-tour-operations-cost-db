@@ -9,8 +9,8 @@ the migrations and nothing else: the instance, its volume, its extensions and th
 ## What it holds
 
 The schema `operations_cost`, the roles `operations_cost_reader` and `operations_cost_writer` (they cannot log in and have no
-password) and the grant of the writer to `operations_cost_app`. The writer reads, inserts and updates and **never deletes**:
-a departure is cancelled, never erased. The tables, of HU-OPS-001 and HU-OPS-002:
+password) and the grant of the writer to `operations_cost_app`. The writer reads, inserts and updates and **never deletes**, with one exception, the assignment of a vehicle to a departure (HU-OPS-002 part B), and it never updates the two tables of records that are not rewritten, `salida_cost` and `salida_extraordinary_cancellation`:
+a departure is cancelled, never erased. The tables, of HU-OPS-001 to HU-OPS-007:
 
 - `salida`: the departures of a tour, with their code `SAL-nnn` per tenant, the scheduled start and estimated end, the time
   zone and the status;
@@ -60,8 +60,7 @@ pull request pastes the local run instead. `tests/check-structure.sh` is the sta
 
 ## What is missing
 
-Everything of the other stories of the domain: removing a vehicle from a departure (HU-OPS-002 part B, it will need its own grant to delete), the columns that cancelling a
-departure will need (HU-OPS-006), the delivered services and the costs.
+What the other stories of the domain will need: the columns that cancelling a departure needs (HU-OPS-006), and whatever the novelties and the personal emergency of a traveler keep (HU-OPS-008).
 
 ## Branching
 
