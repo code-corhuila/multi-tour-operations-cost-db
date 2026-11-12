@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS operations_cost.idx_salida_extraordinary_cancellation_tenant_id_salida_id;
