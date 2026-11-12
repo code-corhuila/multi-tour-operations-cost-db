@@ -142,3 +142,21 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-tables-009
+      author: Molina211
+      labels: "HU-OPS-005,ddl,tables"
+      comment: "The extraordinary cancellation of a reservation of a departure, with its justification (spec 007)."
+      changes:
+        - sqlFile:
+            path: 009_create_salida_extraordinary_cancellation.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/009_create_salida_extraordinary_cancellation.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

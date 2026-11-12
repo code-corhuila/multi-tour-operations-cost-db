@@ -1,0 +1,1 @@
+GRANT UPDATE ON operations_cost.salida_extraordinary_cancellation TO operations_cost_writer;
