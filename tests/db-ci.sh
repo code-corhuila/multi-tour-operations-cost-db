@@ -255,6 +255,7 @@ only_the_four_states_of_the_pdr_are_accepted() {
     case $status in
       IN_EXECUTION) set -- "$STARTED" "started_by='$ACTOR'" ;;
       FINISHED) set -- "$STARTED" "started_by='$ACTOR'" "$ENDED" "finished_by='$ACTOR'" ;;
+      CANCELLED) set -- "cancelled_at='2026-12-01 09:00:00+00'" "cancellation_cause='NOT_ATTRIBUTABLE_TO_CUSTOMER'" ;;
       *) set -- ;;
     esac
     psql_admin -c "$(departure "code='SAL-0$n'" "status='$status'" "$@")" >/dev/null || { echo "the state $status was refused"; return 1; }
@@ -284,7 +285,7 @@ the_tenant_is_mandatory_and_indexed_with_state_and_start() {
 the_application_user_cannot_delete_a_departure() {
   clean_departures || return 1
   psql_admin -c "$(departure)" >/dev/null || return 1
-  psql_app -c "UPDATE operations_cost.salida SET status = 'CANCELLED'" >/dev/null || { echo "the application user cannot update a departure"; return 1; }
+  psql_app -c "UPDATE operations_cost.salida SET time_zone = 'America/Lima'" >/dev/null || { echo "the application user cannot update a departure"; return 1; }
   out=$(psql_app -c "DELETE FROM operations_cost.salida" 2>&1) && { echo "the application user deleted a departure"; return 1; }
   printf '%s' "$out" | grep -q "permission denied" || { echo "refused, but not for a missing privilege: $out"; return 1; }
   [ "$(psql_admin -c "SELECT count(*) FROM operations_cost.salida")" = 1 ] || { echo "the departure is gone"; return 1; }
@@ -761,6 +762,8 @@ a_cancellation_is_never_rewritten() {
   refused "a cancellation is final" "UPDATE operations_cost.salida SET cancellation_cause = 'NOT_ATTRIBUTABLE_TO_CUSTOMER', cancellation_reason = NULL WHERE salida_id = '$S1'" || return 1
   refused "a cancellation is final" "UPDATE operations_cost.salida SET cancellation_reason = 'another reason' WHERE salida_id = '$S1'" || return 1
   refused chk_salida_cancellation "UPDATE operations_cost.salida SET status = 'SCHEDULED' WHERE salida_id = '$S1'" || return 1
+  # the refusal has a code the service can tell apart from any other raised exception: a check violation (23514)
+  out=$(psql_admin -c "DO \$\$ BEGIN UPDATE operations_cost.salida SET cancellation_reason = 'again' WHERE salida_id = '$S1'; EXCEPTION WHEN check_violation THEN RAISE EXCEPTION 'caught_check_violation'; END \$\$" 2>&1)     || printf '%s' "$out" | grep -q caught_check_violation || { echo "the rewrite of a cancellation is not refused with a check violation: $out"; return 1; }
 }
 the_application_user_cancels_a_departure_and_never_deletes_one() {
   clean_departures || return 1
