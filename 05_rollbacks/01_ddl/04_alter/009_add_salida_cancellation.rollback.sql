@@ -1,0 +1,1 @@
+ALTER TABLE operations_cost.salida DROP CONSTRAINT IF EXISTS chk_salida_cancellation_reason, DROP CONSTRAINT IF EXISTS chk_salida_cancellation_cause, DROP CONSTRAINT IF EXISTS chk_salida_cancellation, DROP COLUMN IF EXISTS cancellation_reason, DROP COLUMN IF EXISTS cancellation_cause, DROP COLUMN IF EXISTS cancelled_by, DROP COLUMN IF EXISTS cancelled_at;
