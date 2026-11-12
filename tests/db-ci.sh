@@ -45,6 +45,12 @@
 #   I·a_cancellation_has_its_bounded_justification                               AC-DB-07.2
 #   I·a_cancellation_belongs_to_a_departure_of_its_tenant                        AC-DB-07.4
 #   I·the_application_user_records_but_never_changes_a_cancellation              AC-DB-07.6
+# Checks of spec 008 (HU-OPS-006, the cancellation of a departure):
+#   I·the_cancellation_columns_exist_and_an_old_departure_has_none         AC-DB-08.1
+#   I·a_cancelled_departure_has_its_instant_and_cause_and_only_it          AC-DB-08.2
+#   I·the_cause_and_the_reason_agree_and_the_reason_is_bounded             AC-DB-08.3
+#   I·a_cancellation_is_never_rewritten                                    AC-DB-08.4
+#   I·the_application_user_cancels_a_departure_and_never_deletes_one       AC-DB-08.6
 # Checks of spec 004 (HU-OPS-003 part B, the mark and the regularization):
 #   I·the_regularization_columns_exist_and_an_old_departure_has_none     AC-DB-04.1
 #   I·the_mark_needs_its_moment_and_only_marks_an_open_departure         AC-DB-04.2
@@ -206,7 +212,7 @@ departure() { # [column=value ...]
     case ${kv%%=*} in
       id) id=$v ;; tenant) tenant=$v ;; code) code=$v ;; service) service=$v ;; starts) starts=$v ;;
       ends) ends=$v ;; zone) zone=$v ;; status) status=$v ;; by) by=$v ;; at) at=$v ;;
-      actual_start_at|started_by|actual_end_at|finished_by|interrupted|interruption_cause|pending_regularization|pending_marked_at|regularized_by|regularized_at|early_start_reason)
+      actual_start_at|started_by|actual_end_at|finished_by|interrupted|interruption_cause|pending_regularization|pending_marked_at|regularized_by|regularized_at|early_start_reason|cancelled_at|cancelled_by|cancellation_cause|cancellation_reason)
         extra_cols="$extra_cols, ${kv%%=*}"; extra_vals="$extra_vals, $v" ;;
       *) printf 'UNKNOWN_OVERRIDE_%s' "${kv%%=*}"; return 0 ;;
     esac
@@ -713,6 +719,58 @@ the_application_user_records_but_never_changes_a_cancellation() {
   done
 }
 
+CANCELLED_AT="cancelled_at='2026-12-01 09:00:00+00'"
+the_cancellation_columns_exist_and_an_old_departure_has_none() {
+  clean_departures || return 1
+  cols=$(psql_admin -c "SELECT string_agg(column_name || ':' || is_nullable, ',' ORDER BY column_name) FROM information_schema.columns
+    WHERE table_schema = 'operations_cost' AND table_name = 'salida' AND column_name IN ('cancelled_at', 'cancelled_by',
+    'cancellation_cause', 'cancellation_reason')")
+  [ "$cols" = "cancellation_cause:YES,cancellation_reason:YES,cancelled_at:YES,cancelled_by:YES" ] \
+    || { echo "the cancellation columns are not as the plan says: '$cols'"; return 1; }
+  psql_admin -c "$(departure)" >/dev/null || { echo "a departure that was never cancelled was refused"; return 1; }
+  [ "$(psql_admin -c "SELECT cancelled_at IS NULL, cancelled_by IS NULL, cancellation_cause IS NULL, cancellation_reason IS NULL FROM operations_cost.salida")" = "t|t|t|t" ] \
+    || { echo "a departure that was never cancelled has a value in a new column"; return 1; }
+}
+a_cancelled_departure_has_its_instant_and_cause_and_only_it() {
+  clean_departures || return 1
+  refused chk_salida_cancellation "$(departure "status='CANCELLED'")" || return 1
+  refused chk_salida_cancellation "$(departure "status='CANCELLED'" "$CANCELLED_AT")" || return 1
+  refused chk_salida_cancellation "$(departure "status='CANCELLED'" "cancellation_cause='NOT_ATTRIBUTABLE_TO_CUSTOMER'")" || return 1
+  refused chk_salida_cancellation "$(departure "$CANCELLED_AT" "cancellation_cause='NOT_ATTRIBUTABLE_TO_CUSTOMER'")" || return 1
+  refused chk_salida_cancellation "$(departure "cancelled_by='$ACTOR'")" || return 1
+  psql_admin -c "$(departure "status='CANCELLED'" "$CANCELLED_AT" "cancellation_cause='NOT_ATTRIBUTABLE_TO_CUSTOMER'")" >/dev/null \
+    || { echo "a cancellation by the system was refused"; return 1; }
+  psql_admin -c "$(departure "code='SAL-002'" "status='CANCELLED'" "$CANCELLED_AT" "cancelled_by='$ACTOR'" "cancellation_cause='NOT_ATTRIBUTABLE_TO_CUSTOMER'")" >/dev/null \
+    || { echo "a cancellation by a person was refused"; return 1; }
+}
+the_cause_and_the_reason_agree_and_the_reason_is_bounded() {
+  clean_departures || return 1
+  base="status='CANCELLED'"
+  refused chk_salida_cancellation_cause "$(departure "$base" "$CANCELLED_AT" "cancellation_cause='OTHER'")" || return 1
+  refused chk_salida_cancellation_reason "$(departure "$base" "$CANCELLED_AT" "cancellation_cause='NOT_CARRIED_OUT'")" || return 1
+  refused chk_salida_cancellation_reason "$(departure "$base" "$CANCELLED_AT" "cancellation_cause='NOT_CARRIED_OUT'" "cancellation_reason=''")" || return 1
+  refused chk_salida_cancellation_reason "$(departure "$base" "$CANCELLED_AT" "cancellation_cause='NOT_CARRIED_OUT'" "cancellation_reason='$(printf 'r%.0s' $(seq 1 501))'")" || return 1
+  refused chk_salida_cancellation_reason "$(departure "$base" "$CANCELLED_AT" "cancellation_cause='NOT_ATTRIBUTABLE_TO_CUSTOMER'" "cancellation_reason='a reason'")" || return 1
+  psql_admin -c "$(departure "$base" "$CANCELLED_AT" "cancellation_cause='NOT_CARRIED_OUT'" "cancellation_reason='$(printf 'r%.0s' $(seq 1 500))'")" >/dev/null \
+    || { echo "a reason of 500 characters was refused"; return 1; }
+}
+a_cancellation_is_never_rewritten() {
+  clean_departures || return 1
+  psql_admin -c "$(departure "id='$S1'" "status='CANCELLED'" "$CANCELLED_AT" "cancellation_cause='NOT_CARRIED_OUT'" "cancellation_reason='nobody came'")" >/dev/null || return 1
+  refused "a cancellation is final" "UPDATE operations_cost.salida SET cancelled_at = cancelled_at + interval '1 minute' WHERE salida_id = '$S1'" || return 1
+  refused "a cancellation is final" "UPDATE operations_cost.salida SET cancellation_cause = 'NOT_ATTRIBUTABLE_TO_CUSTOMER', cancellation_reason = NULL WHERE salida_id = '$S1'" || return 1
+  refused "a cancellation is final" "UPDATE operations_cost.salida SET cancellation_reason = 'another reason' WHERE salida_id = '$S1'" || return 1
+  refused chk_salida_cancellation "UPDATE operations_cost.salida SET status = 'SCHEDULED' WHERE salida_id = '$S1'" || return 1
+}
+the_application_user_cancels_a_departure_and_never_deletes_one() {
+  clean_departures || return 1
+  psql_admin -c "$(departure "id='$S1'")" >/dev/null || return 1
+  psql_app -c "UPDATE operations_cost.salida SET status = 'CANCELLED', cancelled_at = now(), cancellation_cause = 'NOT_ATTRIBUTABLE_TO_CUSTOMER' WHERE salida_id = '$S1' AND status = 'SCHEDULED'" >/dev/null \
+    || { echo "the application user cannot cancel a departure"; return 1; }
+  out=$(psql_app -c "DELETE FROM operations_cost.salida" 2>&1) && { echo "the application user deleted a departure"; return 1; }
+  printf '%s' "$out" | grep -q "permission denied" || { echo "refused, but not for a missing privilege: $out"; return 1; }
+}
+
 # ---- the instance, as multi-tour-infra-postgres leaves it: the database, the user of the domain and another domain's schema
 docker network create "$RUN_ID" >/dev/null || exit 1
 docker run -d --name "$RUN_ID" --network "$RUN_ID" -e POSTGRES_PASSWORD="$ADMIN_PASSWORD" -e POSTGRES_DB="$DB" "$POSTGRES_IMAGE" >/dev/null || exit 1
@@ -774,6 +832,11 @@ check "I·the_cancellation_table_exists_with_one_row_per_reservation_of_a_depart
 check "I·a_cancellation_has_its_bounded_justification" a_cancellation_has_its_bounded_justification
 check "I·a_cancellation_belongs_to_a_departure_of_its_tenant" a_cancellation_belongs_to_a_departure_of_its_tenant
 check "I·the_application_user_records_but_never_changes_a_cancellation" the_application_user_records_but_never_changes_a_cancellation
+check "I·the_cancellation_columns_exist_and_an_old_departure_has_none" the_cancellation_columns_exist_and_an_old_departure_has_none
+check "I·a_cancelled_departure_has_its_instant_and_cause_and_only_it" a_cancelled_departure_has_its_instant_and_cause_and_only_it
+check "I·the_cause_and_the_reason_agree_and_the_reason_is_bounded" the_cause_and_the_reason_agree_and_the_reason_is_bounded
+check "I·a_cancellation_is_never_rewritten" a_cancellation_is_never_rewritten
+check "I·the_application_user_cancels_a_departure_and_never_deletes_one" the_application_user_cancels_a_departure_and_never_deletes_one
 check "I·the_full_rollback_leaves_nothing_and_the_rebuild_is_identical" the_full_rollback_leaves_nothing_and_the_rebuild_is_identical
 
 [ "$fail" = 0 ] && echo "ALL CHECKS PASSED" || echo "SOME CHECKS FAILED"
