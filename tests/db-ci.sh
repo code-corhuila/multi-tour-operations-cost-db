@@ -40,6 +40,11 @@
 #   I·a_cost_belongs_to_a_departure_of_its_tenant                            AC-DB-06.5
 #   I·a_cost_key_is_unique_in_a_tenant_and_8_to_128_characters               AC-DB-06.6
 #   I·the_application_user_records_but_never_changes_a_cost                  AC-DB-06.8
+# Checks of spec 007 (HU-OPS-005, the extraordinary cancellations):
+#   I·the_cancellation_table_exists_with_one_row_per_reservation_of_a_departure   AC-DB-07.1, -07.3
+#   I·a_cancellation_has_its_bounded_justification                               AC-DB-07.2
+#   I·a_cancellation_belongs_to_a_departure_of_its_tenant                        AC-DB-07.4
+#   I·the_application_user_records_but_never_changes_a_cancellation              AC-DB-07.6
 # Checks of spec 004 (HU-OPS-003 part B, the mark and the regularization):
 #   I·the_regularization_columns_exist_and_an_old_departure_has_none     AC-DB-04.1
 #   I·the_mark_needs_its_moment_and_only_marks_an_open_departure         AC-DB-04.2
@@ -216,7 +221,7 @@ ENDED="actual_end_at='2026-12-01 17:30:00+00'"
 # (the vehicle tables are included when they exist, so the checks of spec 001 also run on a schema without them)
 clean_departures() {
   tables=$(psql_admin -c "SELECT string_agg(format('%I.%I', schemaname, tablename), ',') FROM pg_tables
-    WHERE schemaname = '$SCHEMA' AND tablename IN ('idempotency_key', 'salida', 'salida_vehicle', 'vehicle', 'vehicle_idempotency_key', 'salida_service', 'salida_cost')")
+    WHERE schemaname = '$SCHEMA' AND tablename IN ('idempotency_key', 'salida', 'salida_vehicle', 'vehicle', 'vehicle_idempotency_key', 'salida_service', 'salida_cost', 'salida_extraordinary_cancellation')")
   psql_admin -c "TRUNCATE $tables" >/dev/null || { echo "could not clean the departures"; return 1; }
 }
 
@@ -664,6 +669,50 @@ the_application_user_records_but_never_changes_a_cost() {
   done
 }
 
+xcancel() { # salida id, reservation id, [column=value ...]: an extraordinary cancellation, valid unless overridden
+  sid=$1; rid=$2; shift 2
+  tenant="'$T1'"; just="'emergency of the traveler'"; by="'$ACTOR'"; at="now()"
+  for kv in "$@"; do
+    v=${kv#*=}
+    case ${kv%%=*} in
+      tenant) tenant=$v ;; just) just=$v ;; by) by=$v ;; at) at=$v ;;
+      *) printf 'UNKNOWN_OVERRIDE_%s' "${kv%%=*}"; return 0 ;;
+    esac
+  done
+  printf "INSERT INTO operations_cost.salida_extraordinary_cancellation (tenant_id, salida_id, reservation_id, justification, recorded_by, recorded_at) VALUES (%s, '%s', '%s', %s, %s, %s)"     "$tenant" "$sid" "$rid" "$just" "$by" "$at"
+}
+the_cancellation_table_exists_with_one_row_per_reservation_of_a_departure() {
+  a_running_departure || return 1
+  psql_admin -c "$(xcancel $S1 $R1)" >/dev/null || { echo "a valid cancellation was refused"; return 1; }
+  psql_admin -c "$(xcancel $S1 $R2)" >/dev/null || { echo "a second reservation of the same departure was refused"; return 1; }
+  refused pk_salida_extraordinary_cancellation "$(xcancel $S1 $R1)" || return 1
+  [ "$(psql_admin -c "SELECT count(*) FROM information_schema.columns WHERE table_schema = '$SCHEMA' AND table_name = 'salida_extraordinary_cancellation'")" = 6 ] || { echo "the table does not have the six columns"; return 1; }
+}
+a_cancellation_has_its_bounded_justification() {
+  a_running_departure || return 1
+  refused chk_salida_extraordinary_cancellation_justification "$(xcancel $S1 $R1 "just=''")" || return 1
+  refused chk_salida_extraordinary_cancellation_justification "$(xcancel $S1 $R1 "just='$(printf 'j%.0s' $(seq 1 501))'")" || return 1
+  refused salida_extraordinary_cancellation "$(xcancel $S1 $R1 just=NULL)" || return 1
+  psql_admin -c "$(xcancel $S1 $R1 "just='$(printf 'j%.0s' $(seq 1 500))'")" >/dev/null || { echo "a justification of 500 was refused"; return 1; }
+}
+a_cancellation_belongs_to_a_departure_of_its_tenant() {
+  a_running_departure || return 1
+  refused fk_salida_extraordinary_cancellation_salida "$(xcancel 00000000-0000-4000-8000-0000000000ff $R1)" || return 1
+  refused fk_salida_extraordinary_cancellation_salida "$(xcancel $S1 $R1 "tenant='$T2'")" || return 1
+  psql_admin -c "$(xcancel $S1 $R1)" >/dev/null || return 1
+  refused fk_salida_extraordinary_cancellation_salida "DELETE FROM operations_cost.salida WHERE salida_id = '$S1'" || return 1
+  [ "$(psql_admin -c "SELECT count(*) FROM pg_indexes WHERE schemaname = '$SCHEMA' AND tablename = 'salida_extraordinary_cancellation' AND indexname = 'idx_salida_extraordinary_cancellation_tenant_id_salida_id'")" = 1 ] || { echo "the index of the key is missing"; return 1; }
+}
+the_application_user_records_but_never_changes_a_cancellation() {
+  a_running_departure || return 1
+  psql_app -c "$(xcancel $S1 $R1)" >/dev/null || { echo "the application user cannot insert a cancellation"; return 1; }
+  [ "$(psql_app -c "SELECT count(*) FROM operations_cost.salida_extraordinary_cancellation")" = 1 ] || { echo "the application user cannot read a cancellation"; return 1; }
+  for statement in "UPDATE operations_cost.salida_extraordinary_cancellation SET justification = 'x'" "DELETE FROM operations_cost.salida_extraordinary_cancellation"; do
+    out=$(psql_app -c "$statement" 2>&1) && { echo "the application user changed a cancellation: $statement"; return 1; }
+    printf '%s' "$out" | grep -q "permission denied" || { echo "refused, but not for a missing privilege: $out"; return 1; }
+  done
+}
+
 # ---- the instance, as multi-tour-infra-postgres leaves it: the database, the user of the domain and another domain's schema
 docker network create "$RUN_ID" >/dev/null || exit 1
 docker run -d --name "$RUN_ID" --network "$RUN_ID" -e POSTGRES_PASSWORD="$ADMIN_PASSWORD" -e POSTGRES_DB="$DB" "$POSTGRES_IMAGE" >/dev/null || exit 1
@@ -721,6 +770,10 @@ check "I·a_cost_without_a_catalogued_cost_is_manual_and_justified" a_cost_witho
 check "I·a_cost_belongs_to_a_departure_of_its_tenant" a_cost_belongs_to_a_departure_of_its_tenant
 check "I·a_cost_key_is_unique_in_a_tenant_and_8_to_128_characters" a_cost_key_is_unique_in_a_tenant_and_8_to_128_characters
 check "I·the_application_user_records_but_never_changes_a_cost" the_application_user_records_but_never_changes_a_cost
+check "I·the_cancellation_table_exists_with_one_row_per_reservation_of_a_departure" the_cancellation_table_exists_with_one_row_per_reservation_of_a_departure
+check "I·a_cancellation_has_its_bounded_justification" a_cancellation_has_its_bounded_justification
+check "I·a_cancellation_belongs_to_a_departure_of_its_tenant" a_cancellation_belongs_to_a_departure_of_its_tenant
+check "I·the_application_user_records_but_never_changes_a_cancellation" the_application_user_records_but_never_changes_a_cancellation
 check "I·the_full_rollback_leaves_nothing_and_the_rebuild_is_identical" the_full_rollback_leaves_nothing_and_the_rebuild_is_identical
 
 [ "$fail" = 0 ] && echo "ALL CHECKS PASSED" || echo "SOME CHECKS FAILED"
