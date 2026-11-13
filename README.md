@@ -8,10 +8,14 @@ the migrations and nothing else: the instance, its volume, its extensions and th
 
 ## What it holds
 
-Today, the schema `operations_cost`, the roles `operations_cost_reader` and `operations_cost_writer` (they cannot log in and
-have no password) and the grant of the writer to `operations_cost_app`. The writer reads, inserts and updates and **never
-deletes**: a departure is cancelled, never erased. The tables of HU-OPS-001 (the departures, the outbox and the idempotency
-key) arrive in the next pull requests of the story.
+The schema `operations_cost`, the roles `operations_cost_reader` and `operations_cost_writer` (they cannot log in and have no
+password) and the grant of the writer to `operations_cost_app`. The writer reads, inserts and updates and **never deletes**:
+a departure is cancelled, never erased. The tables, all of HU-OPS-001:
+
+- `salida`: the departures of a tour, with their code `SAL-nnn` per tenant, the scheduled start and estimated end, the time
+  zone and the status;
+- `outbox_event`: the events written in the same transaction as the change, which job 7 reads and delivers;
+- `idempotency_key`: the key of a creation and the departure it created, so a repeat answers the same departure.
 
 ## How it runs
 
@@ -48,8 +52,8 @@ pull request pastes the local run instead. `tests/check-structure.sh` is the sta
 
 ## What is missing
 
-The tables of the story HU-OPS-001 (departures, outbox, idempotency key), and everything of the other stories of the domain:
-the vehicles of a departure, the start and the end of an execution, the delivered services, the costs and the cancellation.
+Everything of the other stories of the domain: the vehicles of a departure (HU-OPS-002), the start and the end of an
+execution, the delivered services, the costs and the cancellation.
 
 ## Branching
 
