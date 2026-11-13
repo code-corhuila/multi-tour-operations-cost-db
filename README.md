@@ -60,7 +60,7 @@ pull request pastes the local run instead. `tests/check-structure.sh` is the sta
 
 ## What is missing
 
-What the other stories of the domain will need: the columns that cancelling a departure needs (HU-OPS-006), and whatever the novelties and the personal emergency of a traveler keep (HU-OPS-008).
+What the other stories of the domain will need: whatever the novelties and the personal emergency of a traveler keep (HU-OPS-008).
 
 ## Branching
 
