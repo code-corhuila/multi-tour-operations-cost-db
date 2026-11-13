@@ -18,6 +18,8 @@
 #   I·the_application_user_cannot_delete_a_vehicle                     AC-DB-02.3, -02.6
 #   I·an_assignment_joins_a_vehicle_and_a_departure_of_one_tenant      AC-DB-02.4, -02.5
 #   I·a_vehicle_key_is_unique_8_to_128_characters_and_points_to_its_vehicle  AC-DB-02.8
+# Check of api spec 008 (HU-OPS-002 part B, the change of the vehicles):
+#   I·the_application_user_deletes_an_assignment_and_never_a_vehicle         api 008 (D-07)
 # Checks of spec 003 (HU-OPS-003, the real start and end):
 #   I·the_execution_columns_exist_and_an_old_departure_is_not_interrupted  AC-DB-03.1
 #   I·a_start_goes_with_the_execution_and_who_recorded_it              AC-DB-03.2
@@ -505,6 +507,17 @@ an_assignment_joins_a_vehicle_and_a_departure_of_one_tenant() {
   psql_app -c "$(assignment $S1 $V2)" >/dev/null || { echo "the application user cannot add an assignment"; return 1; }
   [ "$(psql_app -c "SELECT count(*) FROM operations_cost.salida_vehicle")" = 2 ] || { echo "the application user cannot read the assignments"; return 1; }
 }
+the_application_user_deletes_an_assignment_and_never_a_vehicle() {
+  clean_departures || return 1
+  S1=00000000-0000-4000-8000-0000000000f1
+  psql_admin -c "$(departure "id='$S1'")" >/dev/null || return 1
+  psql_admin -c "$(vehicle)" >/dev/null || return 1
+  psql_admin -c "$(assignment $S1 $V1)" >/dev/null || return 1
+  psql_app -c "DELETE FROM operations_cost.salida_vehicle" >/dev/null || { echo "the application user cannot take a vehicle off a departure"; return 1; }
+  [ "$(psql_admin -c "SELECT count(*) FROM operations_cost.salida_vehicle")" = 0 ] || { echo "the assignment is still there"; return 1; }
+  out=$(psql_app -c "DELETE FROM operations_cost.vehicle" 2>&1) && { echo "the application user deleted a vehicle"; return 1; }
+  printf '%s' "$out" | grep -q "permission denied" || { echo "refused, but not for a missing privilege: $out"; return 1; }
+}
 
 vehicle_key() { # scope, key, vehicle id
   printf "INSERT INTO operations_cost.vehicle_idempotency_key (scope, idempotency_key, vehicle_id) VALUES ('%s', '%s', '%s')" "$1" "$2" "$3"
@@ -683,6 +696,7 @@ check "I·a_vehicle_has_a_name_and_a_capacity_in_range" a_vehicle_has_a_name_and
 check "I·a_vehicle_name_is_unique_in_a_tenant_ignoring_case_and_spaces" a_vehicle_name_is_unique_in_a_tenant_ignoring_case_and_spaces
 check "I·the_application_user_cannot_delete_a_vehicle" the_application_user_cannot_delete_a_vehicle
 check "I·an_assignment_joins_a_vehicle_and_a_departure_of_one_tenant" an_assignment_joins_a_vehicle_and_a_departure_of_one_tenant
+check "I·the_application_user_deletes_an_assignment_and_never_a_vehicle" the_application_user_deletes_an_assignment_and_never_a_vehicle
 check "I·a_vehicle_key_is_unique_8_to_128_characters_and_points_to_its_vehicle" a_vehicle_key_is_unique_8_to_128_characters_and_points_to_its_vehicle
 check "I·the_execution_columns_exist_and_an_old_departure_is_not_interrupted" the_execution_columns_exist_and_an_old_departure_is_not_interrupted
 check "I·a_start_goes_with_the_execution_and_who_recorded_it" a_start_goes_with_the_execution_and_who_recorded_it
