@@ -89,3 +89,21 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-indexes-006
+      author: Molina211
+      labels: "HU-OPS-004,ddl,indexes"
+      comment: "The index of the key of a service record to its departure (spec 005)."
+      changes:
+        - sqlFile:
+            path: 006_create_salida_service_index.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/10_indexes/006_create_salida_service_index.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

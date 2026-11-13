@@ -106,3 +106,21 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-tables-007
+      author: Molina211
+      labels: "HU-OPS-004,ddl,tables"
+      comment: "What each reservation of a departure received: delivered or not, the travelers served and the cause (spec 005)."
+      changes:
+        - sqlFile:
+            path: 007_create_salida_service.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/007_create_salida_service.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
