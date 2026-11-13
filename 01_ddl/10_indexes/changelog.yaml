@@ -70,3 +70,22 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-indexes-005
+      author: Molina211
+      runInTransaction: false
+      labels: "HU-OPS-003,ddl,indexes"
+      comment: "The open departures not yet marked, by estimated end, for job 3; created concurrently because the table has rows."
+      changes:
+        - sqlFile:
+            path: 005_create_salida_open_past_end_index.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/10_indexes/005_create_salida_open_past_end_index.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
