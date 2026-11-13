@@ -1,0 +1,1 @@
+ALTER TABLE operations_cost.salida_personal_emergency DROP CONSTRAINT IF EXISTS fk_salida_personal_emergency_salida;

@@ -143,3 +143,21 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-indexes-009
+      author: Molina211
+      labels: "HU-OPS-008,ddl,indexes"
+      comment: "The index of the key of a personal emergency to its departure (spec 009)."
+      changes:
+        - sqlFile:
+            path: 009_create_salida_personal_emergency_index.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/10_indexes/009_create_salida_personal_emergency_index.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

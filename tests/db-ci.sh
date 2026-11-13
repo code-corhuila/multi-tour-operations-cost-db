@@ -45,6 +45,11 @@
 #   I·a_cancellation_has_its_bounded_justification                               AC-DB-07.2
 #   I·a_cancellation_belongs_to_a_departure_of_its_tenant                        AC-DB-07.4
 #   I·the_application_user_records_but_never_changes_a_cancellation              AC-DB-07.6
+# Checks of spec 009 (HU-OPS-008, the personal emergencies):
+#   I·the_emergency_table_exists_with_one_row_per_reservation_of_a_departure   AC-DB-09.1, -09.3
+#   I·an_emergency_has_its_bounded_detail_and_at_least_one_traveler          AC-DB-09.2
+#   I·an_emergency_belongs_to_a_departure_of_its_tenant                      AC-DB-09.4
+#   I·the_application_user_records_but_never_changes_an_emergency            AC-DB-09.6
 # Checks of spec 008 (HU-OPS-006, the cancellation of a departure):
 #   I·the_cancellation_columns_exist_and_an_old_departure_has_none         AC-DB-08.1
 #   I·a_cancelled_departure_has_its_instant_and_cause_and_only_it          AC-DB-08.2
@@ -227,7 +232,7 @@ ENDED="actual_end_at='2026-12-01 17:30:00+00'"
 # (the vehicle tables are included when they exist, so the checks of spec 001 also run on a schema without them)
 clean_departures() {
   tables=$(psql_admin -c "SELECT string_agg(format('%I.%I', schemaname, tablename), ',') FROM pg_tables
-    WHERE schemaname = '$SCHEMA' AND tablename IN ('idempotency_key', 'salida', 'salida_vehicle', 'vehicle', 'vehicle_idempotency_key', 'salida_service', 'salida_cost', 'salida_extraordinary_cancellation')")
+    WHERE schemaname = '$SCHEMA' AND tablename IN ('idempotency_key', 'salida', 'salida_vehicle', 'vehicle', 'vehicle_idempotency_key', 'salida_service', 'salida_cost', 'salida_extraordinary_cancellation', 'salida_personal_emergency')")
   psql_admin -c "TRUNCATE $tables" >/dev/null || { echo "could not clean the departures"; return 1; }
 }
 
@@ -720,6 +725,52 @@ the_application_user_records_but_never_changes_a_cancellation() {
   done
 }
 
+pemergency() { # salida id, reservation id, [column=value ...]: a personal emergency, valid unless overridden
+  sid=$1; rid=$2; shift 2
+  tenant="'$T1'"; travelers=2; detail="'a traveler fainted on the trail'"; by="'$ACTOR'"; at="now()"
+  for kv in "$@"; do
+    v=${kv#*=}
+    case ${kv%%=*} in
+      tenant) tenant=$v ;; travelers) travelers=$v ;; detail) detail=$v ;; by) by=$v ;; at) at=$v ;;
+      *) printf 'UNKNOWN_OVERRIDE_%s' "${kv%%=*}"; return 0 ;;
+    esac
+  done
+  printf "INSERT INTO operations_cost.salida_personal_emergency (tenant_id, salida_id, reservation_id, affected_travelers, detail, recorded_by, recorded_at) VALUES (%s, '%s', '%s', %s, %s, %s, %s)" "$tenant" "$sid" "$rid" "$travelers" "$detail" "$by" "$at"
+}
+the_emergency_table_exists_with_one_row_per_reservation_of_a_departure() {
+  a_running_departure || return 1
+  psql_admin -c "$(pemergency $S1 $R1)" >/dev/null || { echo "a valid emergency was refused"; return 1; }
+  psql_admin -c "$(pemergency $S1 $R2)" >/dev/null || { echo "a second reservation of the same departure was refused"; return 1; }
+  refused pk_salida_personal_emergency "$(pemergency $S1 $R1)" || return 1
+  [ "$(psql_admin -c "SELECT count(*) FROM information_schema.columns WHERE table_schema = '$SCHEMA' AND table_name = 'salida_personal_emergency'")" = 7 ] || { echo "the table does not have the seven columns"; return 1; }
+}
+an_emergency_has_its_bounded_detail_and_at_least_one_traveler() {
+  a_running_departure || return 1
+  refused chk_salida_personal_emergency_detail "$(pemergency $S1 $R1 "detail=''")" || return 1
+  refused chk_salida_personal_emergency_detail "$(pemergency $S1 $R1 "detail='$(printf 'd%.0s' $(seq 1 1001))'")" || return 1
+  refused salida_personal_emergency "$(pemergency $S1 $R1 detail=NULL)" || return 1
+  refused chk_salida_personal_emergency_affected_travelers "$(pemergency $S1 $R1 travelers=0)" || return 1
+  refused salida_personal_emergency "$(pemergency $S1 $R1 travelers=NULL)" || return 1
+  psql_admin -c "$(pemergency $S1 $R1 "detail='$(printf 'd%.0s' $(seq 1 1000))'" travelers=1)" >/dev/null || { echo "a detail of 1000 with one traveler was refused"; return 1; }
+}
+an_emergency_belongs_to_a_departure_of_its_tenant() {
+  a_running_departure || return 1
+  refused fk_salida_personal_emergency_salida "$(pemergency 00000000-0000-4000-8000-0000000000ff $R1)" || return 1
+  refused fk_salida_personal_emergency_salida "$(pemergency $S1 $R1 "tenant='$T2'")" || return 1
+  psql_admin -c "$(pemergency $S1 $R1)" >/dev/null || return 1
+  refused fk_salida_personal_emergency_salida "DELETE FROM operations_cost.salida WHERE salida_id = '$S1'" || return 1
+  [ "$(psql_admin -c "SELECT count(*) FROM pg_indexes WHERE schemaname = '$SCHEMA' AND tablename = 'salida_personal_emergency' AND indexname = 'idx_salida_personal_emergency_tenant_id_salida_id'")" = 1 ] || { echo "the index of the key is missing"; return 1; }
+}
+the_application_user_records_but_never_changes_an_emergency() {
+  a_running_departure || return 1
+  psql_app -c "$(pemergency $S1 $R1)" >/dev/null || { echo "the application user cannot insert an emergency"; return 1; }
+  [ "$(psql_app -c "SELECT count(*) FROM operations_cost.salida_personal_emergency")" = 1 ] || { echo "the application user cannot read an emergency"; return 1; }
+  for statement in "UPDATE operations_cost.salida_personal_emergency SET detail = 'x'" "DELETE FROM operations_cost.salida_personal_emergency"; do
+    out=$(psql_app -c "$statement" 2>&1) && { echo "the application user changed an emergency: $statement"; return 1; }
+    printf '%s' "$out" | grep -q "permission denied" || { echo "refused, but not for a missing privilege: $out"; return 1; }
+  done
+}
+
 CANCELLED_AT="cancelled_at='2026-12-01 09:00:00+00'"
 the_cancellation_columns_exist_and_an_old_departure_has_none() {
   clean_departures || return 1
@@ -835,6 +886,10 @@ check "I·the_cancellation_table_exists_with_one_row_per_reservation_of_a_depart
 check "I·a_cancellation_has_its_bounded_justification" a_cancellation_has_its_bounded_justification
 check "I·a_cancellation_belongs_to_a_departure_of_its_tenant" a_cancellation_belongs_to_a_departure_of_its_tenant
 check "I·the_application_user_records_but_never_changes_a_cancellation" the_application_user_records_but_never_changes_a_cancellation
+check "I·the_emergency_table_exists_with_one_row_per_reservation_of_a_departure" the_emergency_table_exists_with_one_row_per_reservation_of_a_departure
+check "I·an_emergency_has_its_bounded_detail_and_at_least_one_traveler" an_emergency_has_its_bounded_detail_and_at_least_one_traveler
+check "I·an_emergency_belongs_to_a_departure_of_its_tenant" an_emergency_belongs_to_a_departure_of_its_tenant
+check "I·the_application_user_records_but_never_changes_an_emergency" the_application_user_records_but_never_changes_an_emergency
 check "I·the_cancellation_columns_exist_and_an_old_departure_has_none" the_cancellation_columns_exist_and_an_old_departure_has_none
 check "I·a_cancelled_departure_has_its_instant_and_cause_and_only_it" a_cancelled_departure_has_its_instant_and_cause_and_only_it
 check "I·the_cause_and_the_reason_agree_and_the_reason_is_bounded" the_cause_and_the_reason_agree_and_the_reason_is_bounded
