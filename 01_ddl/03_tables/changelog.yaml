@@ -1,1 +1,54 @@
-databaseChangeLog: []
+databaseChangeLog:
+  - changeSet:
+      id: operations-cost-ddl-tables-001
+      author: Molina211
+      labels: "HU-OPS-001,ddl,tables"
+      comment: "The departure: a tour that really happens on a date. It is cancelled, never erased (spec AC-DB-01.2 to AC-DB-01.6)."
+      changes:
+        - sqlFile:
+            path: 001_create_salida.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/001_create_salida.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-tables-002
+      author: Molina211
+      labels: "HU-OPS-001,ddl,tables"
+      comment: "The outbox of the events this service publishes, written in the same transaction as the change (ADR-004 D4)."
+      changes:
+        - sqlFile:
+            path: 002_create_outbox_event.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/002_create_outbox_event.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-tables-003
+      author: Molina211
+      labels: "HU-OPS-001,ddl,tables"
+      comment: "The idempotency key of a creation: one row per scope and key, pointing to the departure it created."
+      changes:
+        - sqlFile:
+            path: 003_create_idempotency_key.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/003_create_idempotency_key.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
