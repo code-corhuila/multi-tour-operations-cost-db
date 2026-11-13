@@ -1,0 +1,1 @@
+GRANT UPDATE ON operations_cost.salida_personal_emergency TO operations_cost_writer;
