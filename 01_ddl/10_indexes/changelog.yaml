@@ -107,3 +107,21 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-indexes-007
+      author: Molina211
+      labels: "HU-OPS-007,ddl,indexes"
+      comment: "The index of the key of a cost to its departure (spec 006)."
+      changes:
+        - sqlFile:
+            path: 007_create_salida_cost_index.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/10_indexes/007_create_salida_cost_index.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
