@@ -160,3 +160,21 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-alter-010
+      author: Molina211
+      labels: "HU-OPS-008,ddl,alter"
+      comment: "The key of a personal emergency to its departure, with the tenant (spec 009)."
+      changes:
+        - sqlFile:
+            path: 010_add_salida_personal_emergency_salida_foreign_key.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/010_add_salida_personal_emergency_salida_foreign_key.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

@@ -70,3 +70,21 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: operations-cost-dcl-grants-005
+      author: Molina211
+      labels: "HU-OPS-008,dcl,grants"
+      comment: "A personal emergency is never rewritten: the writer loses UPDATE on it (spec 009)."
+      changes:
+        - sqlFile:
+            path: 005_revoke_personal_emergency_update.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/03_dcl/01_grants/005_revoke_personal_emergency_update.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
