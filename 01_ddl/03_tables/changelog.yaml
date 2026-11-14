@@ -160,3 +160,21 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-tables-010
+      author: Molina211
+      labels: "HU-OPS-008,ddl,tables"
+      comment: "The personal emergency of a reservation of a departure, with the travelers affected and its detail (spec 009)."
+      changes:
+        - sqlFile:
+            path: 010_create_salida_personal_emergency.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/010_create_salida_personal_emergency.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

@@ -9,8 +9,8 @@ the migrations and nothing else: the instance, its volume, its extensions and th
 ## What it holds
 
 The schema `operations_cost`, the roles `operations_cost_reader` and `operations_cost_writer` (they cannot log in and have no
-password) and the grant of the writer to `operations_cost_app`. The writer reads, inserts and updates and **never deletes**, with one exception, the assignment of a vehicle to a departure (HU-OPS-002 part B), and it never updates the two tables of records that are not rewritten, `salida_cost` and `salida_extraordinary_cancellation`:
-a departure is cancelled, never erased. The tables, of HU-OPS-001 to HU-OPS-007:
+password) and the grant of the writer to `operations_cost_app`. The writer reads, inserts and updates and **never deletes**, with one exception, the assignment of a vehicle to a departure (HU-OPS-002 part B), and it never updates the three tables of records that are not rewritten, `salida_cost`, `salida_extraordinary_cancellation` and `salida_personal_emergency`:
+a departure is cancelled, never erased. The tables, of HU-OPS-001 to HU-OPS-008:
 
 - `salida`: the departures of a tour, with their code `SAL-nnn` per tenant, the scheduled start and estimated end, the time
   zone and the status;
@@ -22,6 +22,7 @@ a departure is cancelled, never erased. The tables, of HU-OPS-001 to HU-OPS-007:
 - `salida_service`: what each reservation of a departure received (delivered or not, travelers served, cause, no-show), one row per reservation, replaced when saved again;
 - `salida_cost`: the real operational costs of a departure, one row per line, calculated (catalogued cost times the travelers served) or a real expense with its justification when the tour has no parametrized cost; never updated nor deleted.
 - `salida_extraordinary_cancellation`: the extraordinary cancellation of a reservation of a departure in execution, one row per reservation, with its justification, who and when; inserted and read, never updated nor deleted.
+- `salida_personal_emergency`: the personal emergency of a reservation of a departure in execution (HU-OPS-008), one row per reservation, with the travelers affected (at least one), its detail (1 to 1000 characters), who and when; inserted and read, never updated nor deleted. That the travelers do not exceed those of the reservation is judged by the api, because the reservation lives in another schema.
 
 The table `salida` also keeps what happened in a departure (HU-OPS-003): the real start and end, who recorded each, whether it ended as an interruption and why, the mark of pending regularization with the moment it was set (`pending_marked_at`, which stays after the mark is cleared as the anchor of the retention count), and, when a person regularized it, who and when (`regularized_by`, `regularized_at`) and why it started earlier than scheduled (`early_start_reason`). The engine checks that they agree with the state; a partial index, `idx_salida_open_past_end`, finds the open departures that job 3 has not marked yet. It also keeps the cancellation of a departure (HU-OPS-006): when it was cancelled, by whom when a person did, the cause (not attributable to the customer, or not performed) and, for a departure regularized as not performed, the written reason; the engine ties them to the state `CANCELLED` and a trigger refuses to change them once written.
 
@@ -60,7 +61,7 @@ pull request pastes the local run instead. `tests/check-structure.sh` is the sta
 
 ## What is missing
 
-What the other stories of the domain will need: whatever the novelties and the personal emergency of a traveler keep (HU-OPS-008).
+What the other stories of the domain will need: whatever the ordinary novelties and the history of a departure keep (another story).
 
 ## Branching
 
