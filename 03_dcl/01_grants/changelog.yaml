@@ -88,3 +88,21 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: operations-cost-dcl-grants-006
+      author: Molina211
+      labels: "HU-SEC-005,dcl,grants"
+      comment: "The writer moves a cutoff forward and records a processed event, and deletes neither (spec 010)."
+      changes:
+        - sqlFile:
+            path: 006_grant_session_cutoffs.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/03_dcl/01_grants/006_grant_session_cutoffs.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
