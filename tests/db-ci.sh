@@ -50,6 +50,11 @@
 #   I·an_emergency_has_its_bounded_detail_and_at_least_one_traveler          AC-DB-09.2
 #   I·an_emergency_belongs_to_a_departure_of_its_tenant                      AC-DB-09.4
 #   I·the_application_user_records_but_never_changes_an_emergency            AC-DB-09.6
+# Checks of spec 010 (HU-SEC-005, the session cutoffs of the accounts):
+#   I·a_cutoff_is_one_per_account_and_its_tenant_is_optional                 RN-OPS-DB-100
+#   I·a_cutoff_needs_its_instant                                             RN-OPS-DB-101
+#   I·a_processed_event_is_kept_once                                         RN-OPS-DB-102
+#   I·the_application_user_moves_a_cutoff_but_never_deletes_it               RN-OPS-DB-103
 # Checks of spec 008 (HU-OPS-006, the cancellation of a departure):
 #   I·the_cancellation_columns_exist_and_an_old_departure_has_none         AC-DB-08.1
 #   I·a_cancelled_departure_has_its_instant_and_cause_and_only_it          AC-DB-08.2
@@ -232,7 +237,7 @@ ENDED="actual_end_at='2026-12-01 17:30:00+00'"
 # (the vehicle tables are included when they exist, so the checks of spec 001 also run on a schema without them)
 clean_departures() {
   tables=$(psql_admin -c "SELECT string_agg(format('%I.%I', schemaname, tablename), ',') FROM pg_tables
-    WHERE schemaname = '$SCHEMA' AND tablename IN ('idempotency_key', 'salida', 'salida_vehicle', 'vehicle', 'vehicle_idempotency_key', 'salida_service', 'salida_cost', 'salida_extraordinary_cancellation', 'salida_personal_emergency')")
+    WHERE schemaname = '$SCHEMA' AND tablename IN ('idempotency_key', 'salida', 'salida_vehicle', 'vehicle', 'vehicle_idempotency_key', 'salida_service', 'salida_cost', 'salida_extraordinary_cancellation', 'salida_personal_emergency', 'account_session_cutoff', 'processed_event')")
   psql_admin -c "TRUNCATE $tables" >/dev/null || { echo "could not clean the departures"; return 1; }
 }
 
@@ -771,6 +776,44 @@ the_application_user_records_but_never_changes_an_emergency() {
   done
 }
 
+A1=00000000-0000-4000-8000-0000000000c2
+E1=00000000-0000-4000-8000-0000000000c3
+cutoff() { # account id, tenant and revoked from, each a quoted value or NULL: a session cutoff
+  printf "INSERT INTO operations_cost.account_session_cutoff (account_id, tenant_id, revoked_from) VALUES (%s, %s, %s)" "$1" "$2" "$3"
+}
+a_cutoff_is_one_per_account_and_its_tenant_is_optional() {
+  clean_departures || return 1
+  psql_admin -c "$(cutoff "'$A1'" "'$T1'" "now()")" >/dev/null || { echo "a cutoff with its tenant was refused"; return 1; }
+  refused pk_account_session_cutoff "$(cutoff "'$A1'" "'$T2'" "now()")" || return 1
+  psql_admin -c "$(cutoff "'00000000-0000-4000-8000-0000000000c4'" NULL "now()")" >/dev/null || { echo "a cutoff without a tenant was refused"; return 1; }
+  [ "$(psql_admin -c "SELECT count(*) FROM operations_cost.account_session_cutoff WHERE updated_at IS NOT NULL")" = 2 ] || { echo "a cutoff has no instant of its last change"; return 1; }
+}
+a_cutoff_needs_its_instant() {
+  clean_departures || return 1
+  refused "null value in column" "$(cutoff "'$A1'" "'$T1'" NULL)" || return 1
+  refused "null value in column" "$(cutoff NULL "'$T1'" "now()")"
+}
+a_processed_event_is_kept_once() {
+  clean_departures || return 1
+  psql_admin -c "INSERT INTO operations_cost.processed_event (event_id) VALUES ('$E1')" >/dev/null || { echo "a processed event was refused"; return 1; }
+  refused pk_processed_event "INSERT INTO operations_cost.processed_event (event_id) VALUES ('$E1')" || return 1
+  refused "null value in column" "INSERT INTO operations_cost.processed_event (event_id) VALUES (NULL)" || return 1
+  [ "$(psql_admin -c "SELECT processed_at IS NOT NULL FROM operations_cost.processed_event")" = t ] || { echo "a processed event has no instant"; return 1; }
+}
+the_application_user_moves_a_cutoff_but_never_deletes_it() {
+  clean_departures || return 1
+  psql_app -c "$(cutoff "'$A1'" "'$T1'" "now()")" >/dev/null || { echo "the application user cannot add a cutoff"; return 1; }
+  psql_app -c "UPDATE operations_cost.account_session_cutoff SET revoked_from = now() + interval '1 minute', updated_at = now() WHERE account_id = '$A1'" >/dev/null     || { echo "the application user cannot move a cutoff forward"; return 1; }
+  [ "$(psql_app -c "SELECT count(*) FROM operations_cost.account_session_cutoff")" = 1 ] || { echo "the application user cannot read a cutoff"; return 1; }
+  psql_app -c "INSERT INTO operations_cost.processed_event (event_id) VALUES ('$E1')" >/dev/null || { echo "the application user cannot record a processed event"; return 1; }
+  [ "$(psql_app -c "SELECT count(*) FROM operations_cost.processed_event")" = 1 ] || { echo "the application user cannot read a processed event"; return 1; }
+  for statement in "DELETE FROM operations_cost.account_session_cutoff" "DELETE FROM operations_cost.processed_event" "UPDATE operations_cost.processed_event SET processed_at = now()"; do
+    out=$(psql_app -c "$statement" 2>&1) && { echo "the application user changed what it must not: $statement"; return 1; }
+    printf '%s' "$out" | grep -q "permission denied" || { echo "refused, but not for a missing privilege: $out"; return 1; }
+  done
+  [ "$(psql_admin -c "SELECT count(*) FROM operations_cost.account_session_cutoff")" = 1 ] || { echo "the cutoff is gone"; return 1; }
+}
+
 CANCELLED_AT="cancelled_at='2026-12-01 09:00:00+00'"
 the_cancellation_columns_exist_and_an_old_departure_has_none() {
   clean_departures || return 1
@@ -890,6 +933,10 @@ check "I·the_emergency_table_exists_with_one_row_per_reservation_of_a_departure
 check "I·an_emergency_has_its_bounded_detail_and_at_least_one_traveler" an_emergency_has_its_bounded_detail_and_at_least_one_traveler
 check "I·an_emergency_belongs_to_a_departure_of_its_tenant" an_emergency_belongs_to_a_departure_of_its_tenant
 check "I·the_application_user_records_but_never_changes_an_emergency" the_application_user_records_but_never_changes_an_emergency
+check "I·a_cutoff_is_one_per_account_and_its_tenant_is_optional" a_cutoff_is_one_per_account_and_its_tenant_is_optional
+check "I·a_cutoff_needs_its_instant" a_cutoff_needs_its_instant
+check "I·a_processed_event_is_kept_once" a_processed_event_is_kept_once
+check "I·the_application_user_moves_a_cutoff_but_never_deletes_it" the_application_user_moves_a_cutoff_but_never_deletes_it
 check "I·the_cancellation_columns_exist_and_an_old_departure_has_none" the_cancellation_columns_exist_and_an_old_departure_has_none
 check "I·a_cancelled_departure_has_its_instant_and_cause_and_only_it" a_cancelled_departure_has_its_instant_and_cause_and_only_it
 check "I·the_cause_and_the_reason_agree_and_the_reason_is_bounded" the_cause_and_the_reason_agree_and_the_reason_is_bounded
