@@ -178,3 +178,39 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-tables-011
+      author: Molina211
+      labels: "HU-SEC-005,ddl,tables"
+      comment: "The session cutoff of an account: its tokens issued before it are refused (spec 010)."
+      changes:
+        - sqlFile:
+            path: 011_create_account_session_cutoff.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/011_create_account_session_cutoff.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-tables-012
+      author: Molina211
+      labels: "HU-SEC-005,ddl,tables"
+      comment: "The events already applied, so a repeat of the relay changes nothing (spec 010)."
+      changes:
+        - sqlFile:
+            path: 012_create_processed_event.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/012_create_processed_event.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

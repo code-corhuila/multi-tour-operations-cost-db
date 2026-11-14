@@ -778,19 +778,19 @@ the_application_user_records_but_never_changes_an_emergency() {
 
 A1=00000000-0000-4000-8000-0000000000c2
 E1=00000000-0000-4000-8000-0000000000c3
-cutoff() { # account id, tenant (a quoted value or NULL), revoked from: a session cutoff
-  printf "INSERT INTO operations_cost.account_session_cutoff (account_id, tenant_id, revoked_from) VALUES ('%s', %s, %s)" "$1" "$2" "$3"
+cutoff() { # account id, tenant and revoked from, each a quoted value or NULL: a session cutoff
+  printf "INSERT INTO operations_cost.account_session_cutoff (account_id, tenant_id, revoked_from) VALUES (%s, %s, %s)" "$1" "$2" "$3"
 }
 a_cutoff_is_one_per_account_and_its_tenant_is_optional() {
   clean_departures || return 1
-  psql_admin -c "$(cutoff $A1 "'$T1'" "now()")" >/dev/null || { echo "a cutoff with its tenant was refused"; return 1; }
-  refused pk_account_session_cutoff "$(cutoff $A1 "'$T2'" "now()")" || return 1
-  psql_admin -c "$(cutoff 00000000-0000-4000-8000-0000000000c4 NULL "now()")" >/dev/null || { echo "a cutoff without a tenant was refused"; return 1; }
+  psql_admin -c "$(cutoff "'$A1'" "'$T1'" "now()")" >/dev/null || { echo "a cutoff with its tenant was refused"; return 1; }
+  refused pk_account_session_cutoff "$(cutoff "'$A1'" "'$T2'" "now()")" || return 1
+  psql_admin -c "$(cutoff "'00000000-0000-4000-8000-0000000000c4'" NULL "now()")" >/dev/null || { echo "a cutoff without a tenant was refused"; return 1; }
   [ "$(psql_admin -c "SELECT count(*) FROM operations_cost.account_session_cutoff WHERE updated_at IS NOT NULL")" = 2 ] || { echo "a cutoff has no instant of its last change"; return 1; }
 }
 a_cutoff_needs_its_instant() {
   clean_departures || return 1
-  refused "null value in column" "$(cutoff $A1 "'$T1'" NULL)" || return 1
+  refused "null value in column" "$(cutoff "'$A1'" "'$T1'" NULL)" || return 1
   refused "null value in column" "$(cutoff NULL "'$T1'" "now()")"
 }
 a_processed_event_is_kept_once() {
@@ -802,7 +802,7 @@ a_processed_event_is_kept_once() {
 }
 the_application_user_moves_a_cutoff_but_never_deletes_it() {
   clean_departures || return 1
-  psql_app -c "$(cutoff $A1 "'$T1'" "now()")" >/dev/null || { echo "the application user cannot add a cutoff"; return 1; }
+  psql_app -c "$(cutoff "'$A1'" "'$T1'" "now()")" >/dev/null || { echo "the application user cannot add a cutoff"; return 1; }
   psql_app -c "UPDATE operations_cost.account_session_cutoff SET revoked_from = now() + interval '1 minute', updated_at = now() WHERE account_id = '$A1'" >/dev/null     || { echo "the application user cannot move a cutoff forward"; return 1; }
   [ "$(psql_app -c "SELECT count(*) FROM operations_cost.account_session_cutoff")" = 1 ] || { echo "the application user cannot read a cutoff"; return 1; }
   psql_app -c "INSERT INTO operations_cost.processed_event (event_id) VALUES ('$E1')" >/dev/null || { echo "the application user cannot record a processed event"; return 1; }
