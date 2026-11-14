@@ -52,3 +52,21 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: operations-cost-dcl-grants-004
+      author: Molina211
+      labels: "HU-OPS-005,dcl,grants"
+      comment: "The writer inserts and reads an extraordinary cancellation and never updates it (spec 007)."
+      changes:
+        - sqlFile:
+            path: 004_revoke_extraordinary_cancellation_update.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/03_dcl/01_grants/004_revoke_extraordinary_cancellation_update.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
