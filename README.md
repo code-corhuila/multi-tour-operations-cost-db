@@ -23,7 +23,7 @@ a departure is cancelled, never erased. The tables, of HU-OPS-001 to HU-OPS-007:
 - `salida_cost`: the real operational costs of a departure, one row per line, calculated (catalogued cost times the travelers served) or a real expense with its justification when the tour has no parametrized cost; never updated nor deleted.
 - `salida_extraordinary_cancellation`: the extraordinary cancellation of a reservation of a departure in execution, one row per reservation, with its justification, who and when; inserted and read, never updated nor deleted.
 
-The table `salida` also keeps what happened in a departure (HU-OPS-003): the real start and end, who recorded each, whether it ended as an interruption and why, the mark of pending regularization with the moment it was set (`pending_marked_at`, which stays after the mark is cleared as the anchor of the retention count), and, when a person regularized it, who and when (`regularized_by`, `regularized_at`) and why it started earlier than scheduled (`early_start_reason`). The engine checks that they agree with the state; a partial index, `idx_salida_open_past_end`, finds the open departures that job 3 has not marked yet.
+The table `salida` also keeps what happened in a departure (HU-OPS-003): the real start and end, who recorded each, whether it ended as an interruption and why, the mark of pending regularization with the moment it was set (`pending_marked_at`, which stays after the mark is cleared as the anchor of the retention count), and, when a person regularized it, who and when (`regularized_by`, `regularized_at`) and why it started earlier than scheduled (`early_start_reason`). The engine checks that they agree with the state; a partial index, `idx_salida_open_past_end`, finds the open departures that job 3 has not marked yet. It also keeps the cancellation of a departure (HU-OPS-006): when it was cancelled, by whom when a person did, the cause (not attributable to the customer, or not performed) and, for a departure regularized as not performed, the written reason; the engine ties them to the state `CANCELLED` and a trigger refuses to change them once written.
 
 ## How it runs
 
@@ -60,7 +60,7 @@ pull request pastes the local run instead. `tests/check-structure.sh` is the sta
 
 ## What is missing
 
-What the other stories of the domain will need: the columns that cancelling a departure needs (HU-OPS-006), and whatever the novelties and the personal emergency of a traveler keep (HU-OPS-008).
+What the other stories of the domain will need: whatever the novelties and the personal emergency of a traveler keep (HU-OPS-008).
 
 ## Branching
 

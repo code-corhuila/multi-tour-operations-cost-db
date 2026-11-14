@@ -1,1 +1,18 @@
-databaseChangeLog: []
+databaseChangeLog:
+  - changeSet:
+      id: operations-cost-ddl-triggers-001
+      author: Molina211
+      labels: "HU-OPS-006,ddl,triggers"
+      comment: "The trigger that runs that function before an update of a departure (spec 008)."
+      changes:
+        - sqlFile:
+            path: 001_salida_cancellation_is_final.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/09_triggers/001_salida_cancellation_is_final.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
