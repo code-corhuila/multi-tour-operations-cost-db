@@ -1,0 +1,216 @@
+databaseChangeLog:
+  - changeSet:
+      id: operations-cost-ddl-tables-001
+      author: Molina211
+      labels: "HU-OPS-001,ddl,tables"
+      comment: "The departure: a tour that really happens on a date. It is cancelled, never erased (spec AC-DB-01.2 to AC-DB-01.6)."
+      changes:
+        - sqlFile:
+            path: 001_create_salida.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/001_create_salida.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-tables-002
+      author: Molina211
+      labels: "HU-OPS-001,ddl,tables"
+      comment: "The outbox of the events this service publishes, written in the same transaction as the change (ADR-004 D4)."
+      changes:
+        - sqlFile:
+            path: 002_create_outbox_event.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/002_create_outbox_event.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-tables-003
+      author: Molina211
+      labels: "HU-OPS-001,ddl,tables"
+      comment: "The idempotency key of a creation: one row per scope and key, pointing to the departure it created."
+      changes:
+        - sqlFile:
+            path: 003_create_idempotency_key.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/003_create_idempotency_key.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-tables-004
+      author: Molina211
+      labels: "HU-OPS-002,ddl,tables"
+      comment: "A vehicle of a tenant: a name and a capacity from 1 to 100 seats. It is never deleted (spec AC-DB-02.1, AC-DB-02.3)."
+      changes:
+        - sqlFile:
+            path: 004_create_vehicle.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/004_create_vehicle.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-tables-005
+      author: Molina211
+      labels: "HU-OPS-002,ddl,tables"
+      comment: "The assignment of a vehicle to a departure, identified by the pair (spec AC-DB-02.4)."
+      changes:
+        - sqlFile:
+            path: 005_create_salida_vehicle.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/005_create_salida_vehicle.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-tables-006
+      author: Molina211
+      labels: "HU-OPS-002,ddl,tables"
+      comment: "The idempotency key of a vehicle creation, pointing to the vehicle it created (spec AC-DB-02.8)."
+      changes:
+        - sqlFile:
+            path: 006_create_vehicle_idempotency_key.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/006_create_vehicle_idempotency_key.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-tables-007
+      author: Molina211
+      labels: "HU-OPS-004,ddl,tables"
+      comment: "What each reservation of a departure received: delivered or not, the travelers served and the cause (spec 005)."
+      changes:
+        - sqlFile:
+            path: 007_create_salida_service.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/007_create_salida_service.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-tables-008
+      author: Molina211
+      labels: "HU-OPS-007,ddl,tables"
+      comment: "A real operational cost of a departure: calculated from the catalogued cost and the travelers served, or a real expense (spec 006)."
+      changes:
+        - sqlFile:
+            path: 008_create_salida_cost.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/008_create_salida_cost.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-tables-009
+      author: Molina211
+      labels: "HU-OPS-005,ddl,tables"
+      comment: "The extraordinary cancellation of a reservation of a departure, with its justification (spec 007)."
+      changes:
+        - sqlFile:
+            path: 009_create_salida_extraordinary_cancellation.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/009_create_salida_extraordinary_cancellation.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-tables-010
+      author: Molina211
+      labels: "HU-OPS-008,ddl,tables"
+      comment: "The personal emergency of a reservation of a departure, with the travelers affected and its detail (spec 009)."
+      changes:
+        - sqlFile:
+            path: 010_create_salida_personal_emergency.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/010_create_salida_personal_emergency.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-tables-011
+      author: Molina211
+      labels: "HU-SEC-005,ddl,tables"
+      comment: "The session cutoff of an account: its tokens issued before it are refused (spec 010)."
+      changes:
+        - sqlFile:
+            path: 011_create_account_session_cutoff.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/011_create_account_session_cutoff.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-tables-012
+      author: Molina211
+      labels: "HU-SEC-005,ddl,tables"
+      comment: "The events already applied, so a repeat of the relay changes nothing (spec 010)."
+      changes:
+        - sqlFile:
+            path: 012_create_processed_event.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/012_create_processed_event.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

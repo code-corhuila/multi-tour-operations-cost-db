@@ -1,0 +1,1 @@
+ALTER TABLE operations_cost.salida_extraordinary_cancellation DROP CONSTRAINT IF EXISTS fk_salida_extraordinary_cancellation_salida;

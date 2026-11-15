@@ -1,0 +1,1 @@
+CREATE INDEX idx_vehicle_idempotency_key_vehicle_id ON operations_cost.vehicle_idempotency_key (vehicle_id);

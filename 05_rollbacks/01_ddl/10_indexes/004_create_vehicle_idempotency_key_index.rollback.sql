@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS operations_cost.idx_vehicle_idempotency_key_vehicle_id;

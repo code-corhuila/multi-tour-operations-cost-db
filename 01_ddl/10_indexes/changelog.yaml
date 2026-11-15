@@ -1,0 +1,163 @@
+databaseChangeLog:
+  - changeSet:
+      id: operations-cost-ddl-indexes-001
+      author: Molina211
+      labels: "HU-OPS-001,ddl,indexes"
+      comment: "The departures of a tenant by state and start (06-data modeling-conventions). The table is empty, so it is not created concurrently."
+      changes:
+        - sqlFile:
+            path: 001_create_salida_indexes.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/10_indexes/001_create_salida_indexes.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-indexes-002
+      author: Molina211
+      labels: "HU-OPS-001,ddl,indexes"
+      comment: "The relay reads the pending events by next attempt; the foreign key of the key table has its own index. Both tables are empty."
+      changes:
+        - sqlFile:
+            path: 002_create_outbox_and_key_indexes.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/10_indexes/002_create_outbox_and_key_indexes.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-indexes-003
+      author: Molina211
+      labels: "HU-OPS-002,ddl,indexes"
+      comment: "The unique name of a vehicle per tenant, and the lookup of the departures of a vehicle. Both tables are new and empty."
+      changes:
+        - sqlFile:
+            path: 003_create_vehicle_indexes.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/10_indexes/003_create_vehicle_indexes.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-indexes-004
+      author: Molina211
+      labels: "HU-OPS-002,ddl,indexes"
+      comment: "Serves the foreign key of the vehicle key table. The table is new and empty."
+      changes:
+        - sqlFile:
+            path: 004_create_vehicle_idempotency_key_index.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/10_indexes/004_create_vehicle_idempotency_key_index.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-indexes-005
+      author: Molina211
+      runInTransaction: false
+      labels: "HU-OPS-003,ddl,indexes"
+      comment: "The open departures not yet marked, by estimated end, for job 3; created concurrently because the table has rows."
+      changes:
+        - sqlFile:
+            path: 005_create_salida_open_past_end_index.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/10_indexes/005_create_salida_open_past_end_index.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-indexes-006
+      author: Molina211
+      labels: "HU-OPS-004,ddl,indexes"
+      comment: "The index of the key of a service record to its departure (spec 005)."
+      changes:
+        - sqlFile:
+            path: 006_create_salida_service_index.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/10_indexes/006_create_salida_service_index.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-indexes-007
+      author: Molina211
+      labels: "HU-OPS-007,ddl,indexes"
+      comment: "The index of the key of a cost to its departure (spec 006)."
+      changes:
+        - sqlFile:
+            path: 007_create_salida_cost_index.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/10_indexes/007_create_salida_cost_index.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-indexes-008
+      author: Molina211
+      labels: "HU-OPS-005,ddl,indexes"
+      comment: "The index of the key of an extraordinary cancellation to its departure (spec 007)."
+      changes:
+        - sqlFile:
+            path: 008_create_salida_extraordinary_cancellation_index.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/10_indexes/008_create_salida_extraordinary_cancellation_index.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: operations-cost-ddl-indexes-009
+      author: Molina211
+      labels: "HU-OPS-008,ddl,indexes"
+      comment: "The index of the key of a personal emergency to its departure (spec 009)."
+      changes:
+        - sqlFile:
+            path: 009_create_salida_personal_emergency_index.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/10_indexes/009_create_salida_personal_emergency_index.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

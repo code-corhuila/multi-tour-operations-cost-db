@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS operations_cost.idx_salida_personal_emergency_tenant_id_salida_id;
